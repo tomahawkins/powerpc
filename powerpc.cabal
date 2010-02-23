@@ -40,6 +40,6 @@ library
     ghc-options:       -W
 
 source-repository head
-    type:     darcs
-    location: http://patch-tag.com/r/tomahawkins/powerpc/pullrepo
+    type:     git
+    location: git@github.com/tomahawkins/powerpc.git
 
