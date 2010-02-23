@@ -1,0 +1,45 @@
+name:    powerpc
+version: 0.0.0
+
+category: Language
+
+synopsis: General tools for PowerPC programs.
+
+description:
+    TODO
+
+author:     Tom Hawkins <tomahawkins@gmail.com>
+maintainer: Tom Hawkins <tomahawkins@gmail.com>
+
+license:      BSD3
+license-file: LICENSE
+
+homepage: http://tomahawkins.org
+
+build-type:    Simple
+cabal-version: >= 1.6
+
+extra-source-files:
+  RELEASE-NOTES
+
+library
+    build-depends:
+        base       >= 4.2     && < 5,
+        bytestring >= 0.9     && < 1.0,
+        containers >= 0.3     && < 0.4
+
+    exposed-modules:
+        Language.PowerPC
+        Language.PowerPC.Disassembler
+        Language.PowerPC.Simulator
+        Language.PowerPC.Syntax
+        Language.PowerPC.Utils
+
+    if impl(ghc > 6.8)
+          ghc-options: -fwarn-tabs
+    ghc-options:       -W
+
+source-repository head
+    type:     darcs
+    location: http://patch-tag.com/r/tomahawkins/powerpc/pullrepo
+
