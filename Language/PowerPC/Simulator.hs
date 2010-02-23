@@ -44,6 +44,8 @@ simulate base start p = loop Machine
 
 step :: Machine -> Machine
 step m = case program m M.! pc m of
+  ADDI d GPR0 i -> set d i n
+  ADDI d a    i -> set d (r a + i) n
   B   a -> m { pc = pc m + a }
   BA  a -> m { pc = a }
   BL  a -> m { pc = pc m + a, lr = pc m + 4 }
@@ -51,8 +53,17 @@ step m = case program m M.! pc m of
   MTSPR a CTR -> n { ctr = r a }
   MTSPR a LR  -> n { lr  = r a }
   MTSPR a XER -> n { xer = r a }
+  MTSPR _ SRInvalid -> n
   Unknown a b c -> error $ printf "unknown instruction:  address: 0x%08X  instruction: 0x%08X  opcode: %d  extended opcode: %d" (pc m) a b c
   where
   n = m { pc = pc m + 4 }
   r :: GPR -> Int
   r a = gprs m !! gprIndex a
+
+  set :: GPR -> Int -> Machine -> Machine
+  set r v m = m { gprs = replace (gprIndex r) v (gprs m) }
+
+replace :: Int -> a -> [a] -> [a]
+replace _ a [] = [a]
+replace i a (b:c) | i <= 0    = a : c
+                  | otherwise = b : replace (i - 1) a c

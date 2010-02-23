@@ -6,7 +6,7 @@ module Language.PowerPC.Disassembler
 import Data.Bits
 import qualified Data.ByteString as BS
 import Data.Word
---import Text.Printf
+import Text.Printf
 
 import Language.PowerPC.Syntax
 import Language.PowerPC.Utils
@@ -21,33 +21,51 @@ pack _ = error "disassemble: byte string not divisable by 4"
 
 instruction :: Int -> Instruction
 instruction a = case (opcd, xo) of
+  (14, _)   -> ADDI rd ra simm
   (18, _) -> case (aa, lk) of
     (False, False) -> B   li
     (True,  False) -> BA  li
     (False, True)  -> BL  li
     (True,  True)  -> BLA li
-  (31, 467) ->
+  (31, 467) -> MTSPR rs spr
     where
   _ -> Unknown a opcd xo
   where
-  opcd = shiftR a 26 .&. 0x3F
+
+  field :: Int -> Int -> Int
+  field h l = shiftR a (31 - l) .&. foldl setBit 0 [0 .. l - h] 
+
+  testBit' :: Int -> Bool
+  testBit' n = testBit a $ 31 - n
+
+  opcd = field 0 5
 
   aa   = testBit a 1
   lk   = testBit a 0
   li   = (if testBit a 25 then 0xFC000000 else 0) .|. a .&. 0x03FFFFFC
+  spr  = case field 11 20 of
+           0x020 -> XER
+           0x100 -> LR
+           0x120 -> CTR
+           _     -> SRInvalid
+           --f     -> error $ printf "unknown spr: 0x%08X  0x%03X" a f
 
-  rs   = gpr $ shiftR a 20 .&. 0x1F
+  rs   = gpr $ field  6 10
+  rd   = gpr $ field  6 10
+  ra   = gpr $ field 11 15
 
-  xoDS  =        a   .&. 0x3
-  xoX   = shiftR a 1 .&. 0x3FF
+  simm = (if testBit' 16 then 0xFFFF0000 else 0) .|. field 16 31
+
+  xoDS  = field 30 31
+  xoX   = field 21 30
   xoXL  = xoX
   xoXFX = xoX
   xoXFL = xoX
-  xoXS  = shiftR a 2 .&. 0x1FF
-  xoXO  = shiftR a 1 .&. 0x1FF
-  xoA   = shiftR a 1 .&. 0x1F
-  xoMD  = shiftR a 2 .&. 0x1
-  xoMDS = shiftR a 1 .&. 0xF
+  xoXS  = field 21 29
+  xoXO  = field 22 30
+  xoA   = field 26 30
+  xoMD  = field 27 29
+  xoMDS = field 27 30
   xoD   = 0
   xoSC  = 0
   xoI   = 0
