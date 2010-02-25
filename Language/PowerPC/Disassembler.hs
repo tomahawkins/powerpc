@@ -7,7 +7,6 @@ import Data.Bits
 import qualified Data.ByteString as BS
 import Data.List
 import Data.Word
---import Text.Printf
 
 import Language.PowerPC.Instruction
 import Language.PowerPC.Instructions

@@ -1,6 +1,5 @@
 module Main where
 
-import qualified Data.ByteString as BS
 import Data.Char
 import Data.List
 import System.Directory

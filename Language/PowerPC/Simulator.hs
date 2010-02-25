@@ -23,9 +23,6 @@ data Machine = Machine
   , cr      :: Word32
   }
 
---instance Show Machine where
-  --show m = printf "program counter = 0x%08X\n" $ pc m
-
 simulate :: Word64 -> Word64 -> BS.ByteString -> IO ()
 simulate base start p = loop Machine
     { program = M.fromList $ zip [fromIntegral base, fromIntegral base + 4 ..] $ disassemble p
@@ -50,7 +47,7 @@ simulate base start p = loop Machine
 step :: Machine -> Machine
 step m = case program m M.! pc m of
   (_, InstructionUnknown opcd xo) -> error $ printf "unknown instruction:  address: 0x%08X  opcode: %d  extended opcode: %d" (pc m) opcd xo
-  (i, Instruction _ _ _ a) -> foldl (act i) m (if null [ () | PC := _ <- a ] then a ++ [PC := Reg PC + 4] else a)
+  (i, Instruction _ _ a) -> foldl (act i) m (if null [ () | PC := _ <- a ] then a ++ [PC := Reg PC + 4] else a)
 
 act :: Word32 -> Machine -> Action -> Machine
 act i m (r := e) = case r of
@@ -58,30 +55,47 @@ act i m (r := e) = case r of
   CR  -> m { cr  = fromIntegral e' }
   LR  -> m { lr  = e' }
   CTR -> m { ctr = e' }
+  XER -> m { xer = e' }
+  RA  -> m { gprs = replace (fromIntegral $ field 11 15) e' (gprs m) }
+  RT  -> m { gprs = replace (fromIntegral $ field  6 10) e' (gprs m) }
   where
-  e' = eval i m e
+  e' = eval e
+
+  field :: Int -> Int -> Word64
+  field h l = shiftR (fromIntegral i) (31 - l) .&. foldl setBit 0 [0 .. fromIntegral l - fromIntegral h] 
+
+  bit :: Int -> Bool
+  bit n = testBit i (31 - n)
 
   eval :: E -> Word64
   eval a = case a of
     Const a -> a
     Reg a -> case a of
       PC  -> pc  m
-      CR  -> cr  m
+      CR  -> fromIntegral $ cr  m
       LR  -> lr  m
       CTR -> ctr m
+      XER -> xer m
+      RA  -> gprs m !! fromIntegral (field 11 15)
+      RT  -> gprs m !! fromIntegral (field  6 10)
     Add a b -> eval a + eval b
     Sub a b -> eval a + eval b
-    --Mul E E
-    --Not E
-    --And E E
-    --Or  E E
-    --Eq  E E
-    --Lt  E E
-    --Shift E Int
+    Mul a b -> eval a * eval b  --XXX Signedness?
+    Not a   -> complement $ eval a
+    And a b -> eval a .&. eval b
+    Or  a b -> eval a .|. eval b
+    Eq  a b -> if eval a == eval b then 1 else 0
+    Lt  a b -> if eval a <  eval b then 1 else 0  --XXX Signedness?
+    Shift a n -> shift (eval a) n
     If a b c -> if a /= 0 then eval b else eval c
-    AA
-    LI
-    LK
+    AA   -> field 30 30
+    LI   -> (if bit  6 then 0xFFFFFFFFFC000000 else 0) .|. field 6 31 .&. complement 0x3
+    LK   -> field 31 31
+    RB   -> gprs m !! fromIntegral (field 16 20)
+    RS   -> gprs m !! fromIntegral (field  6 10)
+    SI   -> (if bit 16 then 0xFFFFFFFF00000000 else 0) .|. field 16 31
+    SPR  -> shiftL (field 16 20) 5 .|. field 11 15
+    UI   -> field 16 31
   
 {-
     null [ () |  

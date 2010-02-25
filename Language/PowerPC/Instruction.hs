@@ -3,17 +3,15 @@ module Language.PowerPC.Instruction
   , Action (..)
   , R (..)
   , E (..)
-  {-
-  , not_
-  , (&&.)
-  , (||.)
+  -- , not_
+  -- , (&&.)
+  -- , (||.)
   , (==.)
-  , (/=.)
+  -- , (/=.)
   , (<.)
-  , (<=.)
-  , (>.)
-  , (>=.)
-  -}
+  -- , (<=.)
+  -- , (>.)
+  -- , (>=.)
   ) where
 
 import Data.Bits
@@ -26,8 +24,7 @@ infixr 1 :=
 
 data Instruction
   = Instruction
-    { mnemonic :: String
-    , opcd     :: Int
+    { opcd     :: Int
     , xo       :: Int
     , action   :: [Action]
     }
@@ -45,10 +42,13 @@ data R
   | LR    -- ^ Link Register
   | CTR   -- ^ Count Register
   | XER   -- ^ Fixed-Point Exception Register
-  | FPSCR -- ^ Floating-Point Status and Control Register
+  -- | FPSCR -- ^ Floating-Point Status and Control Register
+  | RA
+  | RT
   deriving (Show, Eq)
 
 data E
+  -- General expressions.
   = Const Word64
   | Reg R
   | Add E E
@@ -61,9 +61,15 @@ data E
   | Lt  E E
   | Shift E Int
   | If E E E
+  -- Bit fields and registers.
   | AA
   | LI
   | LK
+  | RB
+  | RS
+  | SI
+  | SPR
+  | UI
   deriving (Show, Eq)
 
 instance Num E where
