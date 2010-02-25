@@ -22,7 +22,7 @@ pack _ = error "disassemble: byte string not divisable by 4"
 instruction :: Word32 -> (Word32, Instruction)
 instruction a = case find (\ i -> opcd' == opcd i && xo' == xo i) instructions of
   Just i  -> (a, i)
-  Nothing -> (a, InstructionUnknown { opcd = opcd', xo = xo' })
+  Nothing -> (a, IUnknown { opcd = opcd', xo = xo' })
 
   where
   {-

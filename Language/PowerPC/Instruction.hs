@@ -23,12 +23,13 @@ import Data.Word
 infixr 1 :=
 
 data Instruction
-  = Instruction
-    { opcd     :: Int
+  = I
+    { mnemonic :: String
+    , opcd     :: Int
     , xo       :: Int
     , action   :: [Action]
     }
-  | InstructionUnknown
+  | IUnknown
     { opcd     :: Int
     , xo       :: Int
     }
@@ -45,6 +46,7 @@ data R
   -- | FPSCR -- ^ Floating-Point Status and Control Register
   | RA
   | RT
+  | MEM2 E
   deriving (Show, Eq)
 
 data E
@@ -63,8 +65,10 @@ data E
   | If E E E
   -- Bit fields and registers.
   | AA
+  | D
   | LI
   | LK
+  | RAI
   | RB
   | RS
   | SI

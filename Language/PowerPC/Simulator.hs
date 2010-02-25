@@ -46,8 +46,8 @@ simulate base start p = loop Machine
 
 step :: Machine -> Machine
 step m = case program m M.! pc m of
-  (_, InstructionUnknown opcd xo) -> error $ printf "unknown instruction:  address: 0x%08X  opcode: %d  extended opcode: %d" (pc m) opcd xo
-  (i, Instruction _ _ a) -> foldl (act i) m (if null [ () | PC := _ <- a ] then a ++ [PC := Reg PC + 4] else a)
+  (_, IUnknown opcd xo) -> error $ printf "unknown instruction:  address: 0x%08X  opcode: %d  extended opcode: %d" (pc m) opcd xo
+  (i, I _ _ _ a) -> foldl (act i) m (if null [ () | PC := _ <- a ] then a ++ [PC := Reg PC + 4] else a)
 
 act :: Word32 -> Machine -> Action -> Machine
 act i m (r := e) = case r of
@@ -89,6 +89,7 @@ act i m (r := e) = case r of
     Shift a n -> shift (eval a) n
     If a b c -> if a /= 0 then eval b else eval c
     AA   -> field 30 30
+    D    -> (if bit 16 then 0xFFFFFFFF00000000 else 0) .|. field 16 31
     LI   -> (if bit  6 then 0xFFFFFFFFFC000000 else 0) .|. field 6 31 .&. complement 0x3
     LK   -> field 31 31
     RB   -> gprs m !! fromIntegral (field 16 20)
