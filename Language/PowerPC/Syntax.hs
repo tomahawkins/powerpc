@@ -6,6 +6,7 @@ module Language.PowerPC.Syntax
   , GPR         (..)
   , gpr
   , gprIndex
+  , BranchCondition (..)
   ) where
 
 import Data.List
@@ -15,14 +16,30 @@ type Program = [Instruction]
 
 data Instruction
   = ADDI GPR GPR Int
-  | B   Int
-  | BA  Int
-  | BL  Int
-  | BLA Int
+  | B  Bool Bool Int
+  | BC BranchCondition Int Bool Bool Int
+  | MFMSR  --XXX
+  | MTMSR  --XXX
+  | MFSPR GPR SR
   | MTSPR GPR SR
+  | OR  GPR GPR GPR Bool
+  | ORI GPR GPR Int
   | Unknown Int Int Int
+  deriving (Show, Eq)
 
 data SR = CTR | LR | XER | SRInvalid deriving (Show, Eq)
+
+data BranchCondition
+  = Always
+  | OnTrue
+  | OnFalse
+  | DecThenOnZero
+  | DecThenOnNotZero
+  | DecThenOnZeroAndTrue
+  | DecThenOnNotZeroAndTrue
+  | DecThenOnZeroAndFalse
+  | DecThenOnNotZeroAndFalse
+  deriving (Show, Eq)
 
 data GPR
   = GPR0
