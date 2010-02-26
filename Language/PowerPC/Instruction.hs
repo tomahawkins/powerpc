@@ -12,6 +12,7 @@ module Language.PowerPC.Instruction
   -- , (<=.)
   -- , (>.)
   -- , (>=.)
+  , Flags (..)
   ) where
 
 import Data.Bits
@@ -36,19 +37,14 @@ data Instruction
 
 data Action
   = R := E
-  | Load1
-  | Load2
-  | Load4
-  | Load8
-  | Store1 E
-  | Store2 E
-  | Store4 E
-  | Store8 E
+  | Load Int
+  | Store Int E
+  | AddF [(E, Flags)] E E E
 
 
 data R
   = PC    -- ^ Program Counter
-  | CR    -- ^ Condition Register
+  -- | CR    -- ^ Condition Register
   | LR    -- ^ Link Register
   | CTR   -- ^ Count Register
   | XER   -- ^ Fixed-Point Exception Register
@@ -78,8 +74,10 @@ data E
   | D
   | LI
   | LK
+  | OE
   | RAI
   | RB
+  | Rc
   | RS
   | SI
   | SPR
@@ -185,3 +183,8 @@ a <=. b =  not_ (a >. b)
 a >=. b = not_ (a <. b)
 -}
 
+data Flags
+  = CR E
+  | OV
+  | CA
+  deriving (Show, Eq)
