@@ -36,6 +36,11 @@ data Instruction
 
 data Action
   = R := E
+  | Store1 E E
+  | Store2 E E
+  | Store4 E E
+  | Store8 E E
+
 
 data R
   = PC    -- ^ Program Counter
@@ -46,7 +51,6 @@ data R
   -- | FPSCR -- ^ Floating-Point Status and Control Register
   | RA
   | RT
-  | MEM2 E
   deriving (Show, Eq)
 
 data E

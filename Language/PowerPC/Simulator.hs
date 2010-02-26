@@ -1,6 +1,8 @@
 -- | General tools for PowerPC programs.
 module Language.PowerPC.Simulator
-  ( simulate
+  ( Memory (..)
+  , zeroMemory
+  , simulate
   ) where
 
 import Control.Monad
@@ -21,45 +23,76 @@ data Machine = Machine
   , gprs    :: [Word64]
   , xer     :: Word64
   , cr      :: Word32
+  , memory  :: Memory
   }
 
-simulate :: Word64 -> Word64 -> BS.ByteString -> IO ()
-simulate base start p = loop Machine
-    { program = M.fromList $ zip [fromIntegral base, fromIntegral base + 4 ..] $ disassemble p
-    , pc   = start
-    , lr   = 0
-    , ctr  = 0
-    , gprs = replicate 32 0
-    , xer  = 0
-    , cr   = 0
-    }
+data Memory = Memory
+  { load1  :: Word64 -> IO Word8
+  , load2  :: Word64 -> IO Word16
+  , load4  :: Word64 -> IO Word32
+  , load8  :: Word64 -> IO Word64
+  , store1 :: Word64 -> Word8  -> IO ()
+  , store2 :: Word64 -> Word16 -> IO ()
+  , store4 :: Word64 -> Word32 -> IO ()
+  , store8 :: Word64 -> Word64 -> IO ()
+  }
+
+zeroMemory :: Memory
+zeroMemory = Memory
+  { load1  = \ a   -> printf "load  0x%08X\n" a >> return 0
+  , load2  = \ a   -> printf "load  0x%08X\n" a >> return 0
+  , load4  = \ a   -> printf "load  0x%08X\n" a >> return 0
+  , load8  = \ a   -> printf "load  0x%08X\n" a >> return 0
+  , store1 = \ a d -> printf "store 0x%08X 0x%02X\n"  a d
+  , store2 = \ a d -> printf "store 0x%08X 0x%04X\n"  a d
+  , store4 = \ a d -> printf "store 0x%08X 0x%08X\n"  a d
+  , store8 = \ a d -> printf "store 0x%08X 0x%016X\n" a d
+  }
+
+simulate :: Word64 -> Word64 -> BS.ByteString -> Memory -> IO ()
+simulate base start p m = loop Machine
+  { program = M.fromList $ zip [fromIntegral base, fromIntegral base + 4 ..] $ disassemble p
+  , memory = m
+  , pc      = start
+  , lr      = 0
+  , ctr     = 0
+  , gprs    = replicate 32 0
+  , xer     = 0
+  , cr      = 0
+  }
   where
 
   loop :: Machine -> IO ()
   loop m = when (not $ done m) $ do
-    printf "program counter = 0x%08X\n" $ pc m
-    loop $ step m
+    printf "program counter = 0x%08X  r3 = 0x%08X  r12 = 0x%08X\n" (pc m) (gprs m !! 3) (gprs m !! 12)
+    step m >>= loop
 
   done :: Machine -> Bool
   done m | pc m < base || pc m > base + (fromIntegral (BS.length p) + 4) = error $ printf "program counter out of range: 0x%08X" $ pc m
          | otherwise                                                     = pc m == base + (fromIntegral $ BS.length p)
 
-step :: Machine -> Machine
+step :: Machine -> IO Machine
 step m = case program m M.! pc m of
   (_, IUnknown opcd xo) -> error $ printf "unknown instruction:  address: 0x%08X  opcode: %d  extended opcode: %d" (pc m) opcd xo
-  (i, I _ _ _ a) -> foldl (act i) m (if null [ () | PC := _ <- a ] then a ++ [PC := Reg PC + 4] else a)
+  (i, I _ _ _ a) -> foldM (act i) m (if null [ () | PC := _ <- a ] then a ++ [PC := Reg PC + 4] else a)
 
-act :: Word32 -> Machine -> Action -> Machine
-act i m (r := e) = case r of
-  PC  -> m { pc  = e' }
-  CR  -> m { cr  = fromIntegral e' }
-  LR  -> m { lr  = e' }
-  CTR -> m { ctr = e' }
-  XER -> m { xer = e' }
-  RA  -> m { gprs = replace (fromIntegral $ field 11 15) e' (gprs m) }
-  RT  -> m { gprs = replace (fromIntegral $ field  6 10) e' (gprs m) }
+act :: Word32 -> Machine -> Action -> IO Machine
+act i m a = case a of
+  r := e' -> case r of
+    PC  -> return m { pc  = e }
+    CR  -> return m { cr  = fromIntegral e }
+    LR  -> return m { lr  = e }
+    CTR -> return m { ctr = e }
+    XER -> return m { xer = e }
+    RA  -> return m { gprs = replace (fromIntegral $ field 11 15) e (gprs m) }
+    RT  -> return m { gprs = replace (fromIntegral $ field  6 10) e (gprs m) }
+    where
+    e = eval e'
+  Store1 a d -> store1 (memory m) (eval a) (fromIntegral $ eval d) >> return m
+  Store2 a d -> store2 (memory m) (eval a) (fromIntegral $ eval d) >> return m
+  Store4 a d -> store4 (memory m) (eval a) (fromIntegral $ eval d) >> return m
+  Store8 a d -> store8 (memory m) (eval a) (               eval d) >> return m
   where
-  e' = eval e
 
   field :: Int -> Int -> Word64
   field h l = shiftR (fromIntegral i) (31 - l) .&. foldl setBit 0 [0 .. fromIntegral l - fromIntegral h] 
@@ -76,6 +109,7 @@ act i m (r := e) = case r of
       LR  -> lr  m
       CTR -> ctr m
       XER -> xer m
+      --MEM2 a -> 
       RA  -> gprs m !! fromIntegral (field 11 15)
       RT  -> gprs m !! fromIntegral (field  6 10)
     Add a b -> eval a + eval b
@@ -87,64 +121,18 @@ act i m (r := e) = case r of
     Eq  a b -> if eval a == eval b then 1 else 0
     Lt  a b -> if eval a <  eval b then 1 else 0  --XXX Signedness?
     Shift a n -> shift (eval a) n
-    If a b c -> if a /= 0 then eval b else eval c
+    If a b c -> if eval a /= 0 then eval b else eval c
     AA   -> field 30 30
     D    -> (if bit 16 then 0xFFFFFFFF00000000 else 0) .|. field 16 31
     LI   -> (if bit  6 then 0xFFFFFFFFFC000000 else 0) .|. field 6 31 .&. complement 0x3
     LK   -> field 31 31
+    RAI  -> field 11 15
     RB   -> gprs m !! fromIntegral (field 16 20)
     RS   -> gprs m !! fromIntegral (field  6 10)
     SI   -> (if bit 16 then 0xFFFFFFFF00000000 else 0) .|. field 16 31
     SPR  -> shiftL (field 16 20) 5 .|. field 11 15
     UI   -> field 16 31
   
-{-
-    null [ () |  
-  ADDI d GPR0 i -> set n d i
-  ADDI d a    i -> set n d $ r a + i
-  B aa lk i -> m { pc = if aa then pc m + i else i, lr = if lk then pc m + 4 else lr m }
-  BC b c aa lk i -> mLink { pc = if branch then addr else pc mLink + 4 }
-    where
-    mDec = if elem b [DecThenOnZero, DecThenOnNotZero, DecThenOnZeroAndTrue, DecThenOnNotZeroAndTrue, DecThenOnZeroAndFalse, DecThenOnNotZeroAndFalse]
-             then m { ctr = ctr m - 1 }
-             else m
-    mLink = mDec  { lr = if lk then pc mDec + 4 else lr mDec }
-    addr  = if aa then i else pc mLink + i
-    zero = ctr mDec == 0
-    cond = testBit (cr m) (31 - c)
-    branch = case b of
-      Always                   -> True
-      OnTrue                   ->                 cond
-      OnFalse                  ->             not cond
-      DecThenOnZero            ->     zero
-      DecThenOnNotZero         -> not zero
-      DecThenOnZeroAndTrue     ->     zero &&     cond
-      DecThenOnNotZeroAndTrue  -> not zero &&     cond
-      DecThenOnZeroAndFalse    ->     zero && not cond
-      DecThenOnNotZeroAndFalse -> not zero && not cond
-
-  MFMSR -> n
-  MTMSR -> n
-  MFSPR d CTR -> set n d $ ctr m
-  MFSPR d LR  -> set n d $ lr  m
-  MFSPR d XER -> set n d $ xer m
-  MFSPR _ SRInvalid -> n
-  MTSPR a CTR -> n { ctr = r a }
-  MTSPR a LR  -> n { lr  = r a }
-  MTSPR a XER -> n { xer = r a }
-  MTSPR _ SRInvalid -> n
-  OR  s a b False -> set n a $ r s .|. r b
-  ORI s a i -> set n a $ r s .|. i
-  Unknown a b c -> error $ printf "unknown instruction:  address: 0x%08X  instruction: 0x%08X  opcode: %d  extended opcode: %d" (pc m) a b c
-  where
-  n = m { pc = pc m + 4 }
-  r :: GPR -> Int
-  r a = gprs m !! gprIndex a
-
-  set :: Machine -> GPR -> Int -> Machine
-  set m r v = m { gprs = replace (gprIndex r) v (gprs m) }
--}
-
 replace :: Int -> a -> [a] -> [a]
 replace _ a [] = [a]
 replace i a (b:c) | i <= 0    = a : c

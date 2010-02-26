@@ -19,7 +19,7 @@ instructions =
     , CTR := If (SPR ==. 0x09) RS (Reg LR )
     ] --XXX Need to issue warning if case not covered.
   , I "ori"      24   0 [ RA := Or RS UI ]
-  , I "sth"      44   0 [ MEM2 (If (RAI ==. 0) 0 (Reg RA) + D) := RS ]
-  , I "sthu"     45   0 [ MEM2 (Reg RA + D) := RS, RA := Reg RA + D ]
+  , I "sth"      44   0 [ Store2 (If (RAI ==. 0) 0 (Reg RA) + D) RS ]
+  , I "sthu"     45   0 [ Store2 (Reg RA + D) RS, RA := Reg RA + D ]
   ]
 
