@@ -1,7 +1,6 @@
 -- | General tools for PowerPC programs.
 module Language.PowerPC.Simulator
   ( Memory (..)
-  , zeroMemory
   , simulate
   ) where
 
@@ -23,30 +22,13 @@ data Machine = Machine
   , gprs    :: [Word64]
   , xer     :: Word64
   , cr      :: Word32
+  , ea      :: Word64
   , memory  :: Memory
   }
 
 data Memory = Memory
-  { load1  :: Word64 -> IO Word8
-  , load2  :: Word64 -> IO Word16
-  , load4  :: Word64 -> IO Word32
-  , load8  :: Word64 -> IO Word64
-  , store1 :: Word64 -> Word8  -> IO ()
-  , store2 :: Word64 -> Word16 -> IO ()
-  , store4 :: Word64 -> Word32 -> IO ()
-  , store8 :: Word64 -> Word64 -> IO ()
-  }
-
-zeroMemory :: Memory
-zeroMemory = Memory
-  { load1  = \ a   -> printf "load  0x%08X\n" a >> return 0
-  , load2  = \ a   -> printf "load  0x%08X\n" a >> return 0
-  , load4  = \ a   -> printf "load  0x%08X\n" a >> return 0
-  , load8  = \ a   -> printf "load  0x%08X\n" a >> return 0
-  , store1 = \ a d -> printf "store 0x%08X 0x%02X\n"  a d
-  , store2 = \ a d -> printf "store 0x%08X 0x%04X\n"  a d
-  , store4 = \ a d -> printf "store 0x%08X 0x%08X\n"  a d
-  , store8 = \ a d -> printf "store 0x%08X 0x%016X\n" a d
+  { load  :: Word64 -> Int -> IO [Word8]
+  , store :: Word64 -> [Word8] -> IO ()
   }
 
 simulate :: Word64 -> Word64 -> BS.ByteString -> Memory -> IO ()
@@ -59,6 +41,7 @@ simulate base start p m = loop Machine
   , gprs    = replicate 32 0
   , xer     = 0
   , cr      = 0
+  , ea      = 0
   }
   where
 
@@ -78,27 +61,40 @@ step m = case program m M.! pc m of
 
 act :: Word32 -> Machine -> Action -> IO Machine
 act i m a = case a of
-  r := e' -> case r of
-    PC  -> return m { pc  = e }
-    CR  -> return m { cr  = fromIntegral e }
-    LR  -> return m { lr  = e }
-    CTR -> return m { ctr = e }
-    XER -> return m { xer = e }
-    RA  -> return m { gprs = replace (fromIntegral $ field 11 15) e (gprs m) }
-    RT  -> return m { gprs = replace (fromIntegral $ field  6 10) e (gprs m) }
-    where
-    e = eval e'
-  Store1 a d -> store1 (memory m) (eval a) (fromIntegral $ eval d) >> return m
-  Store2 a d -> store2 (memory m) (eval a) (fromIntegral $ eval d) >> return m
-  Store4 a d -> store4 (memory m) (eval a) (fromIntegral $ eval d) >> return m
-  Store8 a d -> store8 (memory m) (eval a) (               eval d) >> return m
+  r := e -> case r of
+    PC  -> return m { pc  = eval e }
+    CR  -> return m { cr  = fromIntegral $ eval e }
+    LR  -> return m { lr  = eval e }
+    CTR -> return m { ctr = eval e }
+    XER -> return m { xer = eval e }
+    RA  -> return m { gprs = replace (fromIntegral $ field 11 15) (eval e) (gprs m) }
+    RT  -> return m { gprs = replace (fromIntegral $ field  6 10) (eval e) (gprs m) }
+    EA  -> return m { ea = eval e }
+  Load1 -> do d <- load (memory m) (ea m) 1; return m { gprs = replace (fromIntegral $ field  6 10) (fromBytes d) (gprs m) }
+  Load2 -> do d <- load (memory m) (ea m) 2; return m { gprs = replace (fromIntegral $ field  6 10) (fromBytes d) (gprs m) }
+  Load4 -> do d <- load (memory m) (ea m) 4; return m { gprs = replace (fromIntegral $ field  6 10) (fromBytes d) (gprs m) }
+  Load8 -> do d <- load (memory m) (ea m) 8; return m { gprs = replace (fromIntegral $ field  6 10) (fromBytes d) (gprs m) }
+  Store1 d -> store (memory m) (ea m) (toBytes 1 $ eval d) >> return m
+  Store2 d -> store (memory m) (ea m) (toBytes 2 $ eval d) >> return m
+  Store4 d -> store (memory m) (ea m) (toBytes 4 $ eval d) >> return m
+  Store8 d -> store (memory m) (ea m) (toBytes 8 $ eval d) >> return m
   where
 
-  field :: Int -> Int -> Word64
-  field h l = shiftR (fromIntegral i) (31 - l) .&. foldl setBit 0 [0 .. fromIntegral l - fromIntegral h] 
+  toBytes :: Int -> Word64 -> [Word8]
+  toBytes n _ | n <= 0 = []
+  toBytes n d = fromIntegral (shiftR d ((n - 1) * 8)) : toBytes (n - 1) d
 
-  bit :: Int -> Bool
-  bit n = testBit i (31 - n)
+  fromBytes :: [Word8] -> Word64
+  fromBytes = f . reverse
+    where
+    f [] = 0
+    f (a:b) = fromIntegral a .|. shiftL (f b) 8
+
+  field :: Int -> Int -> Word64
+  field h l = shiftR (fromIntegral i) (31 - l) .&. foldl setBit 0 [0 .. l - h] 
+
+  exts :: Int -> Word64 -> Word64
+  exts n w = if testBit w (63 - n) then foldl setBit 0 [63 - n + 1 .. 63]  .|. w else w
 
   eval :: E -> Word64
   eval a = case a of
@@ -109,9 +105,9 @@ act i m a = case a of
       LR  -> lr  m
       CTR -> ctr m
       XER -> xer m
-      --MEM2 a -> 
       RA  -> gprs m !! fromIntegral (field 11 15)
       RT  -> gprs m !! fromIntegral (field  6 10)
+      EA  -> ea m
     Add a b -> eval a + eval b
     Sub a b -> eval a + eval b
     Mul a b -> eval a * eval b  --XXX Signedness?
@@ -122,14 +118,15 @@ act i m a = case a of
     Lt  a b -> if eval a <  eval b then 1 else 0  --XXX Signedness?
     Shift a n -> shift (eval a) n
     If a b c -> if eval a /= 0 then eval b else eval c
+    Exts n a -> exts n $ eval a
     AA   -> field 30 30
-    D    -> (if bit 16 then 0xFFFFFFFF00000000 else 0) .|. field 16 31
-    LI   -> (if bit  6 then 0xFFFFFFFFFC000000 else 0) .|. field 6 31 .&. complement 0x3
+    D    -> exts 16 $ field 16 31
+    LI   -> exts  6 $ field 6 31 .&. complement 0x3
     LK   -> field 31 31
     RAI  -> field 11 15
     RB   -> gprs m !! fromIntegral (field 16 20)
     RS   -> gprs m !! fromIntegral (field  6 10)
-    SI   -> (if bit 16 then 0xFFFFFFFF00000000 else 0) .|. field 16 31
+    SI   -> exts 16 $ field 16 31
     SPR  -> shiftL (field 16 20) 5 .|. field 11 15
     UI   -> field 16 31
   

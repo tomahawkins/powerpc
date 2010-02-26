@@ -36,10 +36,14 @@ data Instruction
 
 data Action
   = R := E
-  | Store1 E E
-  | Store2 E E
-  | Store4 E E
-  | Store8 E E
+  | Load1
+  | Load2
+  | Load4
+  | Load8
+  | Store1 E
+  | Store2 E
+  | Store4 E
+  | Store8 E
 
 
 data R
@@ -51,6 +55,7 @@ data R
   -- | FPSCR -- ^ Floating-Point Status and Control Register
   | RA
   | RT
+  | EA
   deriving (Show, Eq)
 
 data E
@@ -67,6 +72,7 @@ data E
   | Lt  E E
   | Shift E Int
   | If E E E
+  | Exts Int E
   -- Bit fields and registers.
   | AA
   | D
