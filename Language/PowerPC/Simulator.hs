@@ -53,7 +53,14 @@ simulate memory start = loop Machine
 step :: Memory a => a -> Word32 -> Machine -> IO Machine
 step memory instr m = case opcode instr of
 
-  --[ I "add"      31 266 [ AddF [(Rc, CR 0), (OE, OV)] (Reg RA) RB 0 ]
+  -- add
+  (31, 266) -> return n3
+    where
+    r = ra + rb
+    ov = testBit ra 63 == testBit rb 63 && testBit ra 63 /= testBit r 63
+    n1 = set n rti r
+    n2 = if oe then (if ov then setOV n1 else clearOV n1) else n1
+    n3 = if rc then cr0 n2 r else n2
 
   -- addi
   (14,   0) -> return $ set n rti $ if rai == 0 then si else si + ra
@@ -61,8 +68,45 @@ step memory instr m = case opcode instr of
   -- addis
   (15,   0) -> return $ set n rti $ if rai == 0 then shiftL si 16 else shiftL si 16 + ra
 
+  -- andi.
+  (28,   0) -> return n2
+    where
+    r = rs .&. ui
+    n1 = set n rai r
+    n2 = cr0 n1 r
+
   -- b
   (18,   0) -> return m { pc = li + if aa then 0 else pc m, lr = if lk then pc m + 4 else lr m }
+
+  -- bclr
+  (19,  16) -> return m3
+    where
+    m1 = if not $ bo 2 then m { ctr = ctr m - 1 } else m
+    ctr_ok = bo 2 || ((ctr m1 /= 0) /= bo 3)
+    cond_ok = bo 0 || crbi m1 == bo 1
+    m2 = if ctr_ok && cond_ok then m1 { pc = lr m1 .&. complement 3 } else m1 { pc = pc m1 + 4 }
+    m3 = if lk then m2 { lr = pc m1 } else m2
+
+  -- lbz
+  (34,   0) -> do
+    a <- load memory ea 1
+    return $ set n rti $ fromBytes a
+    where
+    ea = d + if rai == 0 then 0 else ra
+
+  -- lhw
+  (40,   0) -> do
+    a <- load memory ea 2
+    return $ set n rti $ fromBytes a
+    where
+    ea = d + if rai == 0 then 0 else ra
+
+  -- lwz
+  (32,   0) -> do
+    a <- load memory ea 4
+    return $ set n rti $ fromBytes a
+    where
+    ea = d + if rai == 0 then 0 else ra
 
   -- lwzu
   (33,   0) -> do
@@ -99,14 +143,20 @@ step memory instr m = case opcode instr of
     where
     ea = d + if rai == 0 then 0 else ra
 
-  --, I "sthu"     45   0 [ EA := Reg RA + D, Store 2 RS, RA := Reg EA ]
+  -- sthu
+  (45,   0) -> store memory ea (toBytes 2 rs) >> return (set n rai ea)
+    where
+    ea = ra + d
 
   -- stw
   (36,   0) -> store memory ea (toBytes 4 rs) >> return n
     where
     ea = d + if rai == 0 then 0 else ra
   
-  --, I "stwu"     37   0 [ EA := Reg RA + D, Store 4 RS, RA := Reg EA ]
+  -- stwu
+  (37,   0) -> store memory ea (toBytes 4 rs) >> return (set n rai ea)
+    where
+    ea = ra + d
 
   (a, b) -> error $ printf "unknown instruction:  address: 0x%08X  instruction: 0x%08X  opcd: %d  xo: %d" (pc m) instr a b
 
@@ -115,8 +165,8 @@ step memory instr m = case opcode instr of
   field :: Int -> Int -> Word64
   field h l = shiftR (fromIntegral instr) (31 - l) .&. foldl setBit 0 [0 .. l - h] 
 
-  bit :: Int -> Bool
-  bit n = testBit instr (31 - n)
+  bool :: Int -> Bool
+  bool n = testBit instr (31 - n)
 
   exts :: Int -> Word64 -> Word64
   exts n w = if testBit w (63 - n) then foldl setBit 0 [63 - n + 1 .. 63]  .|. w else w
@@ -129,16 +179,47 @@ step memory instr m = case opcode instr of
   set :: Machine -> Word64 -> Word64 -> Machine
   set m i v = m { gprs = replace i v $ gprs m }
 
-  aa   = bit 30
+  setOV :: Machine -> Machine
+  setOV m = m { xer = setBit (setBit (xer m) 31) 30 }
+
+  clearOV :: Machine -> Machine
+  clearOV m = m { xer = clearBit (xer m) 30 }
+
+  setCR :: Machine -> Machine
+  setCR m = m { xer = setBit (xer m) 29 }
+
+  clearCR :: Machine -> Machine
+  clearCR m = m { xer = clearBit (xer m) 29 }
+
+  -- Assumes SO has already been set in XER.
+  cr0 :: Machine -> Word64 -> Machine
+  cr0 m a = m { cr = cr m .&. 0x0FFFFFFF .|. (if lt then bit 31 else 0) .|. (if gt then bit 30 else 0) .|. (if eq then bit 29 else 0) .|. (if so then bit 28 else 0) }
+    where
+    lt :: Bool
+    lt = testBit a 63
+    gt :: Bool
+    gt = not eq && not lt
+    eq :: Bool
+    eq = a == 0
+    so :: Bool
+    so = testBit (xer m) 31
+
+
+  aa   = bool 30
+  bi   = field 11 15
+  bo :: Int -> Bool
+  bo i = bool $ 6 + i
+  crbi :: Machine -> Bool
+  crbi m = testBit (cr m) $ 31 - fromIntegral bi
   d    = exts32 16 $ field 16 31
   li   = exts32  6 $ field 6 31 .&. complement 0x3
-  lk   = bit 31
-  oe   = bit 21
+  lk   = bool 31
+  oe   = bool 21
   ra   = gprs m !! fromIntegral rai
   rai  = field 11 15
   rb   = gprs m !! fromIntegral rbi
   rbi  = field 16 20
-  rc   = bit 31
+  rc   = bool 31
   rs   = gprs m !! fromIntegral rsi
   rsi  = field 6 10
   rti  = field 6 10
