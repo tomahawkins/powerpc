@@ -6,17 +6,17 @@ module Language.PowerPC.Simulator
 
 import Control.Monad
 import Data.Bits
-import qualified Data.Map as M
 import Data.Word
 import Text.Printf
 
 import Language.PowerPC.Opcode
 
 -- | Memory interface.
-data Memory = Memory
-  { load  :: Word64 -> Int -> IO [Word8]
-  , store :: Word64 -> [Word8] -> IO ()
-  }
+class Memory a where
+  load  :: a -> Word64 -> Int -> IO [Word8]
+  store :: a -> Word64 -> [Word8] -> IO ()
+  fetch :: a -> Word64 -> IO Word32
+  fetch mem addr = load mem addr 4 >>= return . fromBytes
 
 data Machine = Machine
   { pc      :: Word64
@@ -27,9 +27,9 @@ data Machine = Machine
   , cr      :: Word32
   }
 
--- | Run simulation given memory interface, base address of program, starting address of program, and the program instructions.
-simulate :: Memory -> Word64 -> Word64 -> [Word32] -> IO ()
-simulate memory base start p = loop Machine
+-- | Run simulation given memory and the starting address of program.
+simulate :: Memory a => a -> Word64 -> IO ()
+simulate memory start = loop Machine
   { pc      = start
   , lr      = 0
   , ctr     = 0
@@ -39,19 +39,18 @@ simulate memory base start p = loop Machine
   }
   where
 
-  program = M.fromList $ zip [fromIntegral base, fromIntegral base + 4 ..] p
-
   loop :: Machine -> IO ()
-  loop m = when (not $ done m) $ do
-    n <- step memory (program M.! pc m) m
+  loop m = do
+    next <- fetch memory $ pc m
+    n <- step memory next m
     when (pc m + 4 /= pc n) $ printf "branched to: 0x%08X\n" $ pc n
     loop n
 
-  done :: Machine -> Bool
-  done m | pc m < base || pc m > base + (fromIntegral (length p) + 4) = error $ printf "program counter out of range: 0x%08X" $ pc m
-         | otherwise                                                  = pc m == base + (fromIntegral $ length p)
+  --done :: Machine -> Bool
+  --done m | pc m < base || pc m > base + (fromIntegral (length p) + 4) = error $ printf "program counter out of range: 0x%08X" $ pc m
+         -- | otherwise                                                  = pc m == base + (fromIntegral $ length p)
 
-step :: Memory -> Word32 -> Machine -> IO Machine
+step :: Memory a => a -> Word32 -> Machine -> IO Machine
 step memory instr m = case opcode instr of
 
   --[ I "add"      31 266 [ AddF [(Rc, CR 0), (OE, OV)] (Reg RA) RB 0 ]
@@ -162,7 +161,7 @@ toBytes :: Int -> Word64 -> [Word8]
 toBytes n _ | n <= 0 = []
 toBytes n d = fromIntegral (shiftR d ((n - 1) * 8)) : toBytes (n - 1) d
 
-fromBytes :: [Word8] -> Word64
+fromBytes :: (Integral a, Bits a) => [Word8] -> a
 fromBytes = f . reverse
   where
   f [] = 0
