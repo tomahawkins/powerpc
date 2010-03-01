@@ -8,7 +8,6 @@ import Data.Word
 import Text.Printf
 
 import Language.PowerPC
-import Language.PowerPC.Instructions ()
 
 main :: IO ()
 main = do

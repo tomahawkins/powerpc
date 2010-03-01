@@ -4,21 +4,20 @@ module Language.PowerPC.RTL
   , E    (..)
   , Cond (..)
   , (<==)
+  , if'
+  , warning
   , (==.)
   , (/=.)
   , (&&.)
   , (||.)
-  , assign
-  , if'
-  , warning
   ) where
 
 import Data.Bits
 import Data.Word
 
---infix  4 ==., /=., <., <=., >., >=.
---infixl 3 &&.
---infixl 2 ||.
+infix  4 ==., /=. -- , <., <=., >., >=.
+infixl 3 &&.
+infixl 2 ||.
 infixr 1 <==
 
 data RTL a = RTL (Stmt -> (a, Stmt))
@@ -45,7 +44,8 @@ data E
   | BWOr  E E
   | Shift E E
   | Eq E E
-  | Bit E E
+  | Bit E Int E
+  | Cond [Cond] E
   | AA
   | BD
   | BI
@@ -54,6 +54,7 @@ data E
   | CR
   | CTR
   | D
+  | EA
   | LI
   | LK
   | LR
@@ -73,10 +74,9 @@ data E
   deriving (Show, Eq)
 
 data Stmt
-  = Concat Stmt Stmt
+  = Seq Stmt Stmt
   | Null
   | Assign E E
-  | AssignCond [Cond] E E
   | If E Stmt Stmt
   | Warning String
   deriving (Show, Eq)
@@ -89,19 +89,21 @@ data Cond
   deriving (Show, Eq)
 
 (<==) :: E -> E -> RTL ()
-a <== b = RTL $ \ s0 -> ((), Concat s0 $ Assign a b)
-
-assign :: [Cond] -> E -> E -> RTL ()
-assign conds a b = RTL $ \ s0 -> ((), Concat s0 $ AssignCond conds a b)
+a <== b = RTL $ \ s0 -> ((), seqStmts s0 $ Assign a b)
 
 warning :: String -> RTL ()
-warning msg = RTL $ \ s -> ((), Concat s $ Warning msg)
+warning msg = RTL $ \ s -> ((), seqStmts s $ Warning msg)
 
 if' :: E -> RTL () -> RTL () -> RTL ()
-if' a (RTL b) (RTL c) = RTL $ \ s0 -> ((), Concat s0 $ If a sb sc)
+if' a (RTL b) (RTL c) = RTL $ \ s0 -> ((), seqStmts s0 $ If a sb sc)
   where
   ((), sb) = b Null
   ((), sc) = c Null
+
+seqStmts :: Stmt -> Stmt -> Stmt
+seqStmts Null a = a
+seqStmts a Null = a
+seqStmts a b    = Seq a b
 
 (==.) :: E -> E -> E
 (==.) = Eq
