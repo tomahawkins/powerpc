@@ -1,6 +1,5 @@
 module Language.PowerPC.Instructions
-  ( I (..)
-  , rtl
+  ( rtl
   ) where
 
 import Data.Bits
@@ -13,7 +12,7 @@ import Language.PowerPC.RTL
 data I = I String Int Int (RTL ())
 
 -- | Extracts the RTL statements of an instruction.
-rtl :: Word64 -> Word32 -> Stmt
+rtl :: Word64 -> Word32 -> (String, Stmt)
 rtl addr instr = if null found
   then error $ printf "unknown instruction:  address: 0x%08X  instruction: 0x%08X  opcd: %d  xo: %d" addr instr opcd xo
   else if length found /= 1
@@ -21,7 +20,7 @@ rtl addr instr = if null found
     else head found
   where
   (opcd, xo) = opcode instr
-  found = [ snd $ f Null | I _ opcd' xo' (RTL f) <- instructions, opcd == opcd', xo == xo' ]
+  found = [ (n, snd $ f Null) | I n opcd' xo' (RTL f) <- instructions, opcd == opcd', xo == xo' ]
 
 next :: I -> I
 next (I name opcd xo rtl@(RTL f)) = I name opcd xo $ if branch s then rtl else rtl >> (NIA <== CIA + 4)
@@ -75,11 +74,11 @@ instructions = map next
       RA <== EA
   , I "lhz"    40   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== V "B" + D
+      EA <== V "b" + D
       RT <== MEM EA 2
   , I "lwz"    32   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== V "B" + D
+      EA <== V "b" + D
       RT <== MEM EA 4
   , I "lwzu"   33   0 $ do
       EA <== RA + D

@@ -19,6 +19,7 @@ class Memory a where
   fetch :: a -> Word64 -> IO Word32
   fetch mem addr = load mem addr 4 >>= return . fromBytes
 
+-- | State of processor.
 data Machine = Machine
   { pc      :: Word64
   , lr      :: Word64
@@ -53,7 +54,8 @@ simulate memory start = loop Machine
 
 step :: Memory a => a -> Word32 -> Machine -> IO Machine
 step memory instr m = do
-  (m, env) <- evalStmt (m, []) $ rtl (pc m) instr
+  --print $ rtl (pc m) instr
+  (m, env) <- evalStmt (m, []) $ snd $ rtl (pc m) instr
   return m { pc = lookup' "NIA" env }
 
   where
@@ -65,29 +67,31 @@ step memory instr m = do
       evalStmt a b
     Null -> return (m, env)
     If a b c -> do
-      (a, m) <- evalExpr (m, env) a
+      a <- evalExpr (m, env) a
       if a /= 0 then evalStmt (m, env) b else evalStmt (m, env) c
     Warning msg -> putStrLn ("Warning: " ++ msg) >> return (m, env)
     Assign a b -> do
-      (b, m) <- evalExpr (m, env) b
+      b <- evalExpr (m, env) b
       case a of
         V n -> return (m, (n, b) : env)
         --CR
-        --CTR
-        --EA
+        CTR -> return (m { ctr = b }, env)
         EA  -> return (m, ("EA", b) : env)
-        --LR
-        --MEM E Int
+        LR  -> return (m { lr = b }, env)
+        MEM addr bytes -> do
+          addr <- evalExpr (m, env) addr
+          store memory addr $ toBytes bytes b
+          return (m, env)
         NIA -> return (m, ("NIA", b) : env)
-        --RA
-        --RT
-        --XER
+        RA  -> return (m { gprs = replace (ufield 11 15) b (gprs m) }, env)
+        RT  -> return (m { gprs = replace (ufield  6 10) b (gprs m) }, env)
+        XER -> return (m { xer = b }, env)
         _ -> error $ "Invalid assignment target: " ++ show a
 
-  evalExpr :: (Machine, [(String, Word64)]) -> E -> IO (Word64, Machine)
+  evalExpr :: (Machine, [(String, Word64)]) -> E -> IO Word64
   evalExpr (m, env) a = case a of
-    V n       -> return (lookup' n env, m)
-    C a       -> return (a, m)
+    V n       -> return $ lookup' n env
+    C a       -> return $ a
     Add a b   -> binop (+) a b
     Sub a b   -> binop (-) a b
     Not a     -> uniop (toBool . (== 0)) a
@@ -100,122 +104,60 @@ step memory instr m = do
     Eq a b    -> binop (\ a b -> toBool $ a == b) a b
     Bit a w i -> binop (\ a i -> toBool $ testBit a $ w - 1 - fromIntegral i) a i
     Cond _ a  -> uniop id a --XXX
-    AA        -> return (bool 30, m)
-    --BD
-    --BI
-    --BO
-    --CIA
-    --CR
-    --CTR
-    --D
-    --EA
-    --LI
-    --LK
-    --LR
-    --MEM E Int
-    --NIA
-    --OE
-    --RAI
-    --RA
-    --RB
-    --Rc
-    --RS
-    --RT
-    --SI
-    --SPR
-    --UI
-    --XER
+    AA        -> return $ bool 30
+    BD        -> return $ sfield 16 29
+    BI        -> return $ ufield 11 15
+    BO        -> return $ ufield  6 10
+    CIA       -> return $ pc m
+    CR        -> return $ fromIntegral $ cr m
+    CTR       -> return $ ctr m
+    D         -> return $ sfield 16 31
+    EA        -> return $ lookup' "EA" env
+    LI        -> return $ clearBits (sfield 6 31) [1, 0]
+    LK        -> return $ bool 31
+    LR        -> return $ lr m
+    MEM addr bytes -> do
+      addr <- evalExpr (m, env) addr
+      value <- load memory addr bytes
+      return $ fromBytes value
+    NIA       -> return $ lookup' "NIA" env
+    OE        -> return $ bool 21
+    RAI       -> return $ ufield 11 15
+    RA        -> return $ gprs m !! fromIntegral (ufield 11 15)
+    RB        -> return $ gprs m !! fromIntegral (ufield 16 20)
+    Rc        -> return $ bool 31
+    RS        -> return $ gprs m !! fromIntegral (ufield 6 10)
+    RT        -> return $ gprs m !! fromIntegral (ufield 6 10)
+    SI        -> return $ sfield 16 31
+    SPR       -> return $ shiftL (ufield 16 20) 5 .|. ufield 11 15
+    UI        -> return $ ufield 16 31
+    XER       -> return $ xer m
     where
-    binop :: (Word64 -> Word64 -> Word64) -> E -> E -> IO (Word64, Machine)
+
+    binop :: (Word64 -> Word64 -> Word64) -> E -> E -> IO Word64
     binop f a b = do
-      (a, m) <- evalExpr (m, env) a
-      (b, m) <- evalExpr (m, env) b
-      return (f a b, m)
+      a <- evalExpr (m, env) a
+      b <- evalExpr (m, env) b
+      return $ f a b
 
-    uniop :: (Word64 -> Word64) -> E -> IO (Word64, Machine)
+    uniop :: (Word64 -> Word64) -> E -> IO Word64
     uniop f a = do
-      (a, m) <- evalExpr (m, env) a
-      return (f a, m)
+      a <- evalExpr (m, env) a
+      return $ f a
 
-    toBool :: Bool -> Word64
-    toBool True  = 1
-    toBool False = 1
-    
-    field :: Int -> Int -> Word64
-    field h l = shiftR (fromIntegral instr) (31 - l) .&. foldl setBit 0 [0 .. l - h] 
-
-    bool :: Int -> Word64
-    bool n = toBool $ testBit instr (31 - n)
+  toBool :: Bool -> Word64
+  toBool True  = 1
+  toBool False = 0
   
-{-
-  where
+  ufield :: Int -> Int -> Word64
+  ufield h l = clearBits (shiftR (fromIntegral instr) (31 - l))  [63, 62 .. l - h + 1]
 
-  field :: Int -> Int -> Word64
-  field h l = shiftR (fromIntegral instr) (31 - l) .&. foldl setBit 0 [0 .. l - h] 
+  sfield :: Int -> Int -> Word64
+  sfield h l = (if testBit instr (31 - h) then setBits else clearBits) (shiftR (fromIntegral instr) (31 - l))  [63, 62 .. l - h + 1]
 
-  bool :: Int -> Bool
-  bool n = testBit instr (31 - n)
-
-  exts :: Int -> Word64 -> Word64
-  exts n w = if testBit w (63 - n) then foldl setBit 0 [63 - n + 1 .. 63]  .|. w else w
-
-  exts32 :: Int -> Word64 -> Word64
-  exts32 n =  exts (32 + n)
-
-  n = m { pc = pc m + 4 }
-
-  set :: Machine -> Word64 -> Word64 -> Machine
-  set m i v = m { gprs = replace i v $ gprs m }
-
-  setOV :: Machine -> Machine
-  setOV m = m { xer = setBit (setBit (xer m) 31) 30 }
-
-  clearOV :: Machine -> Machine
-  clearOV m = m { xer = clearBit (xer m) 30 }
-
-  setCR :: Machine -> Machine
-  setCR m = m { xer = setBit (xer m) 29 }
-
-  clearCR :: Machine -> Machine
-  clearCR m = m { xer = clearBit (xer m) 29 }
-
-  -- Assumes SO has already been set in XER.
-  cr0 :: Machine -> Word64 -> Machine
-  cr0 m a = m { cr = cr m .&. 0x0FFFFFFF .|. (if lt then bit 31 else 0) .|. (if gt then bit 30 else 0) .|. (if eq then bit 29 else 0) .|. (if so then bit 28 else 0) }
-    where
-    lt :: Bool
-    lt = testBit a 63
-    gt :: Bool
-    gt = not eq && not lt
-    eq :: Bool
-    eq = a == 0
-    so :: Bool
-    so = testBit (xer m) 31
-
-
-  aa   = bool 30
-  bi   = field 11 15
-  bo :: Int -> Bool
-  bo i = bool $ 6 + i
-  crbi :: Machine -> Bool
-  crbi m = testBit (cr m) $ 31 - fromIntegral bi
-  d    = exts32 16 $ field 16 31
-  li   = exts32  6 $ field 6 31 .&. complement 0x3
-  lk   = bool 31
-  oe   = bool 21
-  ra   = gprs m !! fromIntegral rai
-  rai  = field 11 15
-  rb   = gprs m !! fromIntegral rbi
-  rbi  = field 16 20
-  rc   = bool 31
-  rs   = gprs m !! fromIntegral rsi
-  rsi  = field 6 10
-  rti  = field 6 10
-  si   = exts32 16 $ field 16 31
-  spr  = shiftL (field 16 20) 5 .|. field 11 15
-  ui   = field 16 31
--}
-
+  bool :: Int -> Word64
+  bool n = toBool $ testBit instr (31 - n)
+  
 
 
 
@@ -240,3 +182,11 @@ lookup' :: String -> [(String, b)] -> b
 lookup' a table = case lookup a table of
   Just b -> b
   Nothing -> error $ "Variable name not found: " ++ a
+
+clearBits :: Bits a => a -> [Int] -> a
+clearBits = foldl clearBit
+
+setBits :: Bits a => a -> [Int] -> a
+setBits = foldl setBit
+
+
