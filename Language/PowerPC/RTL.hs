@@ -4,6 +4,7 @@ module Language.PowerPC.RTL
   , E    (..)
   , Cond (..)
   , (<==)
+  , assign
   , if'
   , warning
   , (==.)
@@ -13,7 +14,6 @@ module Language.PowerPC.RTL
   ) where
 
 import Data.Bits
-import Data.Word
 
 infix  4 ==., /=. -- , <., <=., >., >=.
 infixl 3 &&.
@@ -33,7 +33,7 @@ instance Monad RTL where
 
 data E
   = V String
-  | C Word64
+  | C Integer
   | Add E E
   | Sub E E
   | Not E
@@ -45,13 +45,12 @@ data E
   | Shift E E
   | Eq E E
   | Bit E Int E
-  | Cond [Cond] E
   | AA
   | BD
   | BI
   | BO
   | CIA
-  | CR
+  | CReg
   | CTR
   | D
   | EA
@@ -71,25 +70,27 @@ data E
   | SPR
   | UI
   | XER
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 data Stmt
   = Seq Stmt Stmt
   | Null
-  | Assign E E
+  | Assign [Cond] E E
   | If E Stmt Stmt
   | Warning String
   deriving (Show, Eq)
 
 data Cond
-  = CR' E
-  | OV
-  | CA
-  | When E Cond
-  deriving (Show, Eq)
+  = CA E
+  | OV E
+  | CR E E
+  deriving (Show, Eq, Ord)
 
 (<==) :: E -> E -> RTL ()
-a <== b = RTL $ \ s0 -> ((), seqStmts s0 $ Assign a b)
+a <== b = assign [] a b
+
+assign :: [Cond] -> E -> E -> RTL ()
+assign cond a b = RTL $ \ s0 -> ((), seqStmts s0 $ Assign cond a b)
 
 warning :: String -> RTL ()
 warning msg = RTL $ \ s -> ((), seqStmts s $ Warning msg)
@@ -121,12 +122,12 @@ instance Num E where
   a + b = Add a b
   a - b = Sub a b
   --a * b = Mul a b
-  (*) = undefined
+  (*) = error "(*)"
   negate a = 0 - a
   --abs a = mux (a <. 0) (negate a) a
-  abs = undefined
+  abs = error "abs"
   --signum a = mux (a ==. 0) 0 $ mux (a <. 0) (-1) 1
-  signum = undefined
+  signum = error "signum"
   fromInteger = C . fromInteger
 
 instance Bits E where
@@ -135,7 +136,7 @@ instance Bits E where
   a .|. b = BWOr a b
   xor a b = (a .&. complement b) .|. (complement a .&. b)
   shift a n = Shift a $ C $ fromIntegral n
-  rotate = undefined
-  bitSize = undefined
-  isSigned = undefined
+  rotate = error "rotate"
+  bitSize = error "bitSize"
+  isSigned = error "isSigned"
 

@@ -29,31 +29,31 @@ next (I name opcd xo rtl@(RTL f)) = I name opcd xo $ if branch s then rtl else r
   branch :: Stmt -> Bool
   branch a = case a of
     Seq a b -> branch a || branch b
-    Assign NIA _ -> True
+    Assign _ NIA _ -> True
     If _ m n | branch m == branch n -> branch m
              | otherwise -> error $ "NIA not assigned in all branches: " ++ show a
     _ -> False
   
 instructions :: [I]
 instructions = map next
-  [ I "add"    31 266 $ RT <== Cond [When Rc $ CR' 0, When OE OV] (RA + RB)
+  [ I "add"    31 266 $ assign [CR Rc 0, OV OE] RT (RA + RB)
   , I "addi"   14   0 $ if' (RAI ==. 0) (RT <== SI) (RT <== RA + SI)
   , I "addis"  15   0 $ if' (RAI ==. 0) (RT <== shiftL SI 16) (RT <== RA + shiftL SI 16)
-  , I "andi"   28   0 $ RA <== Cond [CR' 0] (RS .&. UI)
-  , I "andis"  29   0 $ RA <== Cond [CR' 0] (RS .&. shiftL UI 16)
+  , I "andi"   28   0 $ assign [CR 1 0] RA (RS .&. UI)
+  , I "andis"  29   0 $ assign [CR 1 0] RA (RS .&. shiftL UI 16)
   , I "b"      18   0 $ if' AA  (NIA <== LI) (NIA <== CIA + LI) >> if' LK (LR <== CIA + 4) (return ())
   , I "bc"     16   0 $ do
       -- XXX Assumes 64-bit mode.
       if' (Not $ Bit BO 5 2) (CTR <== CTR - 1) (return ())
       V "ctr_ok"  <== Bit BO 5 2 ||. ((CTR /=. 0) &&. Not (Bit BO 5 3) ||. (CTR ==. 0) &&. Bit BO 5 3)
-      V "cond_ok" <== Bit BO 5 0 ||. (Bit CR 32 BI ==. Bit BO 5 1)
+      V "cond_ok" <== Bit BO 5 0 ||. (Bit CReg 32 BI ==. Bit BO 5 1)
       if' (V "ctr_ok" &&. V "cond_ok") (if' AA (NIA <== BD) (NIA <== CIA + BD)) (NIA <== CIA + 4)
       if' LK (LR <== CIA + 4) (return ())
   , I "bclr"   19  16 $ do
       -- XXX Assumes 64-bit mode.
       if' (Not $ Bit BO 5 2) (CTR <== CTR - 1) (return ())
       V "ctr_ok"  <== Bit BO 5 2 ||. ((CTR /=. 0) &&. Not (Bit BO 5 3) ||. (CTR ==. 0) &&. Bit BO 5 3)
-      V "cond_ok" <== Bit BO 5 0 ||. (Bit CR 32 BI ==. Bit BO 5 1)
+      V "cond_ok" <== Bit BO 5 0 ||. (Bit CReg 32 BI ==. Bit BO 5 1)
       if' (V "ctr_ok" &&. V "cond_ok") (NIA <== LR .&. complement 3) (NIA <== CIA + 4)
       if' LK (LR <== CIA + 4) (return ())
   , I "lbz"    34   0 $ do
