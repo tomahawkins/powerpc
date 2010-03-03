@@ -28,7 +28,7 @@ instance Memory Mem where
     | addr >= 0x3F8000 && addr < 0x400000 = do
       ram <- readIORef ram
       return $ map (ram M.!) addrs
-    | otherwise = printf "load (%s) 0x%08X %d bytes\n" (section addr) addr bytes
+    | otherwise = printf "load (%s) 0x%08X %d bytes\n" (section addr) addr bytes >> return (replicate (fromIntegral bytes) 0)
     where
     addrs = [addr .. addr + fromIntegral bytes - 1]
 

@@ -46,7 +46,7 @@ simulate memory start = loop Machine
   loop m = do
     next <- fetch memory $ pc m
     n <- step memory next m
-    when (pc m + 4 /= pc n) $ printf "branched to: 0x%08X\n" $ pc n
+    when (pc m + 4 /= pc n) $ printf "branched from 0x%08X to 0x%08X\n" (pc m) (pc n)
     loop n
 
   --done :: Machine -> Bool
@@ -56,14 +56,13 @@ simulate memory start = loop Machine
 step :: Memory a => a -> Word32 -> Machine -> IO Machine
 step memory instr m = do
   --print $ rtl (pc m) instr
-  when (pc m == 0x3280) (printf "Addr: 0x%08X  Instr: 0x%08X  %s\n" (pc m) instr (show $ rtl (pc m) instr))
   (m, env) <- evalStmt (m, []) $ snd $ rtl (pc m) instr
   return m { pc = fromInteger $ lookup' "NIA" env }
 
   where
 
   evalStmt :: (Machine, [(String, Integer)]) -> Stmt -> IO (Machine, [(String, Integer)])
-  evalStmt (m, env) a = when (pc m == 0x3280) (print a) >> case a of
+  evalStmt (m, env) a = case a of
     Seq a b -> do
       a <- evalStmt (m, env) a
       evalStmt a b
@@ -93,7 +92,7 @@ step memory instr m = do
         _ -> error $ "Invalid assignment target: " ++ show a
 
   evalExpr :: (Machine, [(String, Integer)]) -> E -> IO Integer
-  evalExpr (m, env) a = when (pc m == 0x3280) (print a) >> case a of
+  evalExpr (m, env) a = case a of
     V n       -> return $ lookup' n env
     C a       -> return $ a
     Add a b   -> binop (+) a b
@@ -106,7 +105,7 @@ step memory instr m = do
     BWOr  a b -> binop (.|.) a b
     Shift a b -> binop (\ a b -> shift a $ fromIntegral b) a b
     Eq a b    -> binop (\ a b -> toBool $ a == b) a b
-    Bit a w i -> binop (\ a i -> toBool $ testBit a $ w - 1 - fromIntegral i) a i
+    Bit a w i -> binop (\ a i -> if i >= fromIntegral w then error "Bit: bit index greater than width" else toBool $ testBit a $ w - 1 - fromIntegral i) a i
     AA        -> return $ bool 30
     BD        -> return $ sfield 16 29
     BI        -> return $ ufield 11 15
@@ -202,6 +201,7 @@ isOV a = testBit a 64 /= testBit a 63
 
 
 replace :: Integral b => b -> a -> [a] -> [a]
+replace i _ _ | i >= 32 = error "replace: index out of range"
 replace _ a [] = [a]
 replace i a (b:c) | i <= 0    = a : c
                   | otherwise = b : replace (i - 1) a c
