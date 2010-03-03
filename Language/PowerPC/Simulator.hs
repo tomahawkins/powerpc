@@ -55,7 +55,6 @@ simulate memory start = loop Machine
 
 step :: Memory a => a -> Word32 -> Machine -> IO Machine
 step memory instr m = do
-  --print $ rtl (pc m) instr
   (m, env) <- evalStmt (m, []) $ snd $ rtl (pc m) instr
   return m { pc = fromInteger $ lookup' "NIA" env }
 
@@ -63,10 +62,7 @@ step memory instr m = do
 
   evalStmt :: (Machine, [(String, Integer)]) -> Stmt -> IO (Machine, [(String, Integer)])
   evalStmt (m, env) a = case a of
-    Seq a b -> do
-      a <- evalStmt (m, env) a
-      evalStmt a b
-    Null -> return (m, env)
+    Seq a -> foldM evalStmt (m, env) a
     If a b c -> do
       a <- evalExpr (m, env) a
       if a /= 0 then evalStmt (m, env) b else evalStmt (m, env) c
@@ -89,6 +85,7 @@ step memory instr m = do
         RA  -> return (m { gprs = replace (ufield 11 15) b' (gprs m) }, env)
         RT  -> return (m { gprs = replace (ufield  6 10) b' (gprs m) }, env)
         XER -> return (m { xer = b' }, env)
+        Null -> return (m, env)
         _ -> error $ "Invalid assignment target: " ++ show a
 
   evalExpr :: (Machine, [(String, Integer)]) -> E -> IO Integer
@@ -105,9 +102,11 @@ step memory instr m = do
     BWOr  a b -> binop (.|.) a b
     Shift a b -> binop (\ a b -> shift a $ fromIntegral b) a b
     Eq a b    -> binop (\ a b -> toBool $ a == b) a b
+    Null      -> error "Invalid expressions: Null"
     Bit a w i -> binop (\ a i -> if i >= fromIntegral w then error "Bit: bit index greater than width" else toBool $ testBit a $ w - 1 - fromIntegral i) a i
     AA        -> return $ bool 30
-    BD        -> return $ sfield 16 29
+    BD        -> return $ clearBits (sfield 16 31) [1, 0]
+    BF        -> return $ ufield  6  8
     BI        -> return $ ufield 11 15
     BO        -> return $ ufield  6 10
     CIA       -> return $ fromIntegral $ pc m
@@ -115,6 +114,9 @@ step memory instr m = do
     CTR       -> return $ fromIntegral $ ctr m
     D         -> return $ sfield 16 31
     EA        -> return $ lookup' "EA" env
+    EXTS n a  -> uniop (\ a -> if testBit a (63 - n) then a .|. complement (setBits 0 [0 .. 63 - n]) else a .&. setBits 0 [0 .. 63 - n]) a
+    L10       -> return $ bool 10
+    L15       -> return $ bool 15
     LI        -> return $ clearBits (sfield 6 31) [1, 0]
     LK        -> return $ bool 31
     LR        -> return $ fromIntegral $ lr m

@@ -3,8 +3,10 @@ module Language.PowerPC.RTL
   , Stmt (..)
   , E    (..)
   , Cond (..)
+  , stmt
   , (<==)
   , assign
+  , cmp
   , if'
   , warning
   , (==.)
@@ -44,9 +46,11 @@ data E
   | BWOr  E E
   | Shift E E
   | Eq E E
+  | Null
   | Bit E Int E
   | AA
   | BD
+  | BF
   | BI
   | BO
   | CIA
@@ -54,6 +58,9 @@ data E
   | CTR
   | D
   | EA
+  | EXTS Int E
+  | L10
+  | L15
   | LI
   | LK
   | LR
@@ -73,9 +80,8 @@ data E
   deriving (Show, Eq, Ord)
 
 data Stmt
-  = Seq Stmt Stmt
-  | Null
-  | Assign [Cond] E E
+  = Seq [Stmt]
+  | Assign  [Cond] E E
   | If E Stmt Stmt
   | Warning String
   deriving (Show, Eq)
@@ -86,25 +92,31 @@ data Cond
   | CR E E
   deriving (Show, Eq, Ord)
 
+stmt :: RTL () -> Stmt
+stmt (RTL f) = snd $ f $ Seq []
+
 (<==) :: E -> E -> RTL ()
 a <== b = assign [] a b
 
 assign :: [Cond] -> E -> E -> RTL ()
 assign cond a b = RTL $ \ s0 -> ((), seqStmts s0 $ Assign cond a b)
 
+cmp :: [Cond] -> E -> E -> RTL ()
+cmp cond a b = assign cond Null $ a - b
+
 warning :: String -> RTL ()
 warning msg = RTL $ \ s -> ((), seqStmts s $ Warning msg)
 
 if' :: E -> RTL () -> RTL () -> RTL ()
-if' a (RTL b) (RTL c) = RTL $ \ s0 -> ((), seqStmts s0 $ If a sb sc)
-  where
-  ((), sb) = b Null
-  ((), sc) = c Null
+if' a b c = RTL $ \ s0 -> ((), seqStmts s0 $ If a (stmt b) (stmt c))
 
 seqStmts :: Stmt -> Stmt -> Stmt
-seqStmts Null a = a
-seqStmts a Null = a
-seqStmts a b    = Seq a b
+seqStmts (Seq []) a      = a
+seqStmts a (Seq [])      = a
+seqStmts (Seq a) (Seq b) = Seq $ a ++ b
+seqStmts (Seq a) b       = Seq $ a ++ [b]
+seqStmts a (Seq b)       = Seq $ a : b
+seqStmts a b             = Seq [a, b]
 
 (==.) :: E -> E -> E
 (==.) = Eq

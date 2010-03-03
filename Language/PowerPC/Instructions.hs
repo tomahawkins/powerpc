@@ -20,15 +20,14 @@ rtl addr instr = if null found
     else head found
   where
   (opcd, xo) = opcode instr
-  found = [ (n, snd $ f Null) | I n opcd' xo' (RTL f) <- instructions, opcd == opcd', xo == xo' ]
+  found = [ (n, stmt f) | I n opcd' xo' f <- instructions, opcd == opcd', xo == xo' ]
 
 next :: I -> I
-next (I name opcd xo rtl@(RTL f)) = I name opcd xo $ if branch s then rtl else rtl >> (NIA <== CIA + 4)
+next (I name opcd xo rtl) = I name opcd xo $ if branch (stmt rtl) then rtl else rtl >> (NIA <== CIA + 4)
   where
-  ((), s) = f Null
   branch :: Stmt -> Bool
   branch a = case a of
-    Seq a b -> branch a || branch b
+    Seq a -> or $ map branch a
     Assign _ NIA _ -> True
     If _ m n | branch m == branch n -> branch m
              | otherwise -> error $ "NIA not assigned in all branches: " ++ show a
@@ -56,6 +55,26 @@ instructions = map next
       V "cond_ok" <== Bit BO 5 0 ||. (Bit CReg 32 BI ==. Bit BO 5 1)
       if' (V "ctr_ok" &&. V "cond_ok") (NIA <== LR .&. complement 3) (NIA <== CIA + 4)
       if' LK (LR <== CIA + 4) (return ())
+  , I "cmp"    31   0 $ do
+      if' (L10 ==. 0)
+        (do V "a" <== EXTS 32 RA
+            V "b" <== EXTS 32 RB)
+        (do V "a" <== RA
+            V "b" <== RB)
+      cmp [CR 1 BF] (V "a") (V "b")
+  , I "cmpi"   11   0 $ do
+      if' (L10 ==. 0) (V "a" <== EXTS 32 RA) (V "a" <== RA)
+      cmp [CR 1 BF] (V "a") SI
+  , I "cmpl"   31  32 $ do
+      if' (L10 ==. 0)
+        (do V "a" <== 0xFFFFFFFF .|. RA
+            V "b" <== 0xFFFFFFFF .|. RB)
+        (do V "a" <== RA
+            V "b" <== RB)
+      cmp [CR 1 BF] (V "a") (V "b")
+  , I "cmpli"  10   0 $ do
+      if' (L10 ==. 0) (V "a" <== 0xFFFFFFFF .|. RA) (V "a" <== RA)
+      cmp [CR 1 BF] (V "a") UI
   , I "lbz"    34   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
       EA <== V "b" + D
@@ -93,6 +112,22 @@ instructions = map next
                        (if' (SPR ==. 0x08) (LR  <== RS)
                        (if' (SPR ==. 0x09) (CTR <== RS) (warning "unknown mfspr reg")))
   , I "ori"    24   0 $ RA <== RS .|. UI
+  , I "stb"    38   0 $ do
+      if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
+      EA <== V "b" + D
+      MEM EA 1 <== RS
+  , I "stbx"   31 215 $ do
+      if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
+      EA <== V "b" + RB
+      MEM EA 1 <== RS
+  , I "stbu"   39   0 $ do
+      EA <== RA + D
+      MEM EA 1 <== RS
+      RA <== EA
+  , I "stbux"  31 247 $ do
+      EA <== RA + RB
+      MEM EA 1 <== RS
+      RA <== EA
   , I "sth"    44   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
       EA <== V "b" + D
