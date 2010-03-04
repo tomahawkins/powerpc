@@ -87,7 +87,9 @@ data E
   | ROTL32 E E  -- ^ ROTL32 value amount
   | ROTL64 E E  -- ^ ROTL64 value amount
   | RS
+  | RSI
   | RT
+  | RTI
   | SH5
   | SH6
   | SI

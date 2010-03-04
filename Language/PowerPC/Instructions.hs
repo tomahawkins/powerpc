@@ -51,10 +51,14 @@ misc =
 arithmetic :: [I]
 arithmetic =
   [ I "add"    31 266 $ assign [CR Rc 0, OV OE] RT (RA + RB)
+  , I "addc"   31  10 $ assign [CA 1, CR Rc 0, OV OE] RT (RA + RB)
   , I "addi"   14   0 $ if' (RAI ==. 0) (RT <== SI) (RT <== RA + SI)
   , I "addic"  12   0 $ assign [CA 1] RT (RA + SI)
   , I "addic." 13   0 $ assign [CR 1 0, CA 1] RT (RA + SI)
   , I "addis"  15   0 $ if' (RAI ==. 0) (RT <== shiftL SI 16) (RT <== RA + shiftL SI 16)
+  , I "subf"   31  40 $ assign [CR Rc 0, OV OE] RT (complement RA + RB + 1)
+  , I "subfc"  31   8 $ assign [CA 1, CR Rc 0, OV OE] RT (complement RA + RB + 1)
+  , I "subfic"  8   0 $ assign [CA 1] RT (complement RA + SI + 1)
   , I "mullw"  31 235 $ assign [CR Rc 0, OV OE] RT (EXTS 32 RA * EXTS 32 RB)
   ]
 
@@ -112,7 +116,12 @@ branch =
 
 rotating :: [I]
 rotating =
-  [ I "rlwinm" 21 0 $ do
+  [ I "rlwimi" 20 0 $ do
+      V "n" <== SH5
+      V "r" <== ROTL32 RS (V "n")
+      V "m" <== MASK (MB5 + 32) (ME5 + 32)
+      RA    <== V "r" .&. V "m" .|. RA .&. complement (V "m")
+  , I "rlwinm" 21 0 $ do
       V "n" <== SH5
       V "r" <== ROTL32 RS (V "n")
       V "m" <== MASK (MB5 + 32) (ME5 + 32)
@@ -149,7 +158,7 @@ load =
   , I "lmw"    46   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
       EA <== V "b" + D
-      V "r" <== RT
+      V "r" <== RTI
       while (V "r" <=. 31) $ do
         GPR (V "r") <== MEM EA 4
         V "r" <== V "r" + 1
@@ -201,7 +210,7 @@ store =
   , I "stmw" 47 0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
       EA <== V "b" + D
-      V "r" <== RS
+      V "r" <== RSI
       while (V "r" <=. 31) $ do
         MEM EA 4 <== GPR (V "r")
         V "r" <== V "r" + 1

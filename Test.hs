@@ -45,12 +45,15 @@ instance Memory Mem where
 
 load' (Mem p ram) addr bytes
   | fromIntegral addr + bytes - 1 < BS.length p = return $ ("bootloader", map (BS.index p . fromIntegral) addrs)
-  | inRange addr 0x3F8000 0x3FFFFF || inRange addr 0x2F8000 0x2F87FF = do
+  | inSpace addr 0x3F8000 0x8000 || inRange addr 0x2F8000 0x2F87FF = do
     ram <- readIORef ram
-    return $ ("ram", map (ram M.!) addrs)
-  | otherwise = return (section addr, replicate (fromIntegral bytes) 0)
+    if all (flip M.member ram) addrs
+      then return $ ("ram", map (ram M.!) addrs)
+      else printf "Warning: uninitialized ram access: 0x%08X\n" addr >> return ("ram", zeros)
+  | otherwise = return (section addr, zeros)
   where
   addrs = [addr .. addr + fromIntegral bytes - 1]
+  zeros = replicate (fromIntegral bytes) 0
 
 store' (Mem _ ram) addr bytes
   | inRange addr 0x3F8000 0x3FFFFF || inRange addr 0x2F8000 0x2F87FF = do

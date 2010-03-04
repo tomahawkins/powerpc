@@ -60,15 +60,12 @@ simulate memory start = loop Machine
 
   loop :: Machine -> IO ()
   loop m = do
-    print m
-    hFlush stdout
+    --print m >> hFlush stdout
     next <- fetch memory $ pc m
-    let (n, s) = rtl (pc m) next
-    printf "%08X  %-6s  %s\n" (pc m) n (show s)
-    hFlush stdout
+    --let (n, s) = rtl (pc m) next
+    --printf "%08X  %-6s  %s\n" (pc m) n (show s) >> hFlush stdout
     n <- step memory next m
-    when (pc m + 4 /= pc n) $ printf "branched from 0x%08X to 0x%08X\n" (pc m) (pc n)
-    hFlush stdout
+    when (pc m + 4 /= pc n) $ printf "branched from 0x%08X to 0x%08X\n" (pc m) (pc n) >> hFlush stdout
     loop n
 
   --done :: Machine -> Bool
@@ -77,7 +74,6 @@ simulate memory start = loop Machine
 
 step :: Memory a => a -> Word32 -> Machine -> IO Machine
 step memory instr m = do
-  --printf "%08X  LR = %08X  R0 = %08X\n" (pc m) (lr m) (gprs m !! 0)
   (m, env) <- evalStmt (m, []) $ snd $ rtl (pc m) instr
   return m { pc = fromInteger $ lookup' "NIA" env }
 
@@ -181,7 +177,9 @@ step memory instr m = do
     ROTL32 a n -> binop (rotateLN 32) a n
     ROTL64 a n -> binop (rotateLN 64) a n
     RS         -> return $ fromIntegral $ gprs m !! fromIntegral (ufield 6 10)
+    RSI        -> return $ ufield 6 10
     RT         -> return $ fromIntegral $ gprs m !! fromIntegral (ufield 6 10)
+    RTI        -> return $ ufield 6 10
     SH5        -> return $ ufield 16 20
     SH6        -> return $ shiftL (ufield 30 30) 5 .|. ufield 16 20
     SI         -> return $ sfield 16 31
