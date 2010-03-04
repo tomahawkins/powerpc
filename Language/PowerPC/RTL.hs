@@ -8,16 +8,21 @@ module Language.PowerPC.RTL
   , assign
   , cmp
   , if'
+  , while
   , warning
   , (==.)
   , (/=.)
+  , (<.)
+  , (<=.)
+  , (>.)
+  , (>=.)
   , (&&.)
   , (||.)
   ) where
 
 import Data.Bits
 
-infix  4 ==., /=. -- , <., <=., >., >=.
+infix  4 ==., /=., <., <=., >., >=.
 infixl 3 &&.
 infixl 2 ||.
 infixr 1 <==
@@ -38,6 +43,7 @@ data E
   | C Integer
   | Add E E
   | Sub E E
+  | Mul E E
   | Not E
   | And E E
   | Or  E E
@@ -46,6 +52,7 @@ data E
   | BWOr  E E
   | Shift E E
   | Eq E E
+  | Lt E E
   | Null
   | Bit E Int E
   | AA
@@ -59,11 +66,17 @@ data E
   | D
   | EA
   | EXTS Int E
+  | GPR E
   | L10
   | L15
   | LI
   | LK
   | LR
+  | MASK E E    -- ^ Mask start stop
+  | MB5
+  | MB6
+  | ME5
+  | ME6
   | MEM E Int
   | NIA
   | OE
@@ -71,8 +84,12 @@ data E
   | RA
   | RB
   | Rc
+  | ROTL32 E E  -- ^ ROTL32 value amount
+  | ROTL64 E E  -- ^ ROTL64 value amount
   | RS
   | RT
+  | SH5
+  | SH6
   | SI
   | SPR
   | UI
@@ -83,7 +100,8 @@ data Stmt
   = Seq [Stmt]
   | Assign  [Cond] E E
   | If E Stmt Stmt
-  | Warning String
+  | While E Stmt
+  | Warning String [(String, E)]
   deriving (Show, Eq)
 
 data Cond
@@ -104,11 +122,14 @@ assign cond a b = RTL $ \ s0 -> ((), seqStmts s0 $ Assign cond a b)
 cmp :: [Cond] -> E -> E -> RTL ()
 cmp cond a b = assign cond Null $ a - b
 
-warning :: String -> RTL ()
-warning msg = RTL $ \ s -> ((), seqStmts s $ Warning msg)
+warning :: String -> [(String, E)] -> RTL ()
+warning msg fields = RTL $ \ s -> ((), seqStmts s $ Warning msg fields)
 
 if' :: E -> RTL () -> RTL () -> RTL ()
 if' a b c = RTL $ \ s0 -> ((), seqStmts s0 $ If a (stmt b) (stmt c))
+
+while :: E -> RTL () -> RTL ()
+while a b = RTL $ \ s0 -> ((), seqStmts s0 $ While a (stmt b))
 
 seqStmts :: Stmt -> Stmt -> Stmt
 seqStmts (Seq []) a      = a
@@ -124,6 +145,22 @@ seqStmts a b             = Seq [a, b]
 (/=.) :: E -> E -> E
 (/=.) a b = Not $ (==.) a b
 
+-- | Less than.
+(<.) :: E -> E -> E
+(<.) = Lt
+
+-- | Greater than.
+(>.) :: E -> E -> E
+a >. b = b <. a
+
+-- | Less than or equal.
+(<=.) :: E -> E -> E
+a <=. b =  Not (a >. b)
+
+-- | Greater than or equal.
+(>=.) :: E -> E -> E
+a >=. b = Not (a <. b)
+
 (&&.) :: E -> E -> E
 (&&.) = And
 
@@ -133,8 +170,7 @@ seqStmts a b             = Seq [a, b]
 instance Num E where
   a + b = Add a b
   a - b = Sub a b
-  --a * b = Mul a b
-  (*) = error "(*)"
+  a * b = Mul a b
   negate a = 0 - a
   --abs a = mux (a <. 0) (negate a) a
   abs = error "abs"

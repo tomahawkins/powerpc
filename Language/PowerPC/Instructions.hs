@@ -34,28 +34,42 @@ next (I name opcd xo rtl) = I name opcd xo $ if branch (stmt rtl) then rtl else 
     _ -> False
   
 instructions :: [I]
-instructions = map next
+instructions = map next $ concat [misc, arithmetic, logical, comparison, branch, rotating, shifting, load, store]
+
+misc :: [I]
+misc =
+  [ I "mfmsr"  31  83 $ warning "mfmsr instruction ignored" []
+  , I "mfspr"  31 339 $ if' (SPR ==. 0x01) (RT <== XER)
+                       (if' (SPR ==. 0x08) (RT <== LR)
+                       (if' (SPR ==. 0x09) (RT <== CTR) (warning "unknown mfspr register" [("SPR = %d", SPR)])))
+  , I "mtmsr"  31 146 $ warning "mtmsr instruction ignored" []
+  , I "mtspr"  31 467 $ if' (SPR ==. 0x01) (XER <== RS)
+                       (if' (SPR ==. 0x08) (LR  <== RS)
+                       (if' (SPR ==. 0x09) (CTR <== RS) (warning "unknown mtspr register" [("SPR = %d", SPR), ("RS = 0x%016X", RS)])))
+  ]
+
+arithmetic :: [I]
+arithmetic =
   [ I "add"    31 266 $ assign [CR Rc 0, OV OE] RT (RA + RB)
   , I "addi"   14   0 $ if' (RAI ==. 0) (RT <== SI) (RT <== RA + SI)
+  , I "addic"  12   0 $ assign [CA 1] RT (RA + SI)
+  , I "addic." 13   0 $ assign [CR 1 0, CA 1] RT (RA + SI)
   , I "addis"  15   0 $ if' (RAI ==. 0) (RT <== shiftL SI 16) (RT <== RA + shiftL SI 16)
-  , I "andi"   28   0 $ assign [CR 1 0] RA (RS .&. UI)
-  , I "andis"  29   0 $ assign [CR 1 0] RA (RS .&. shiftL UI 16)
-  , I "b"      18   0 $ if' AA  (NIA <== LI) (NIA <== CIA + LI) >> if' LK (LR <== CIA + 4) (return ())
-  , I "bc"     16   0 $ do
-      -- XXX Assumes 64-bit mode.
-      if' (Not $ Bit BO 5 2) (CTR <== CTR - 1) (return ())
-      V "ctr_ok"  <== Bit BO 5 2 ||. ((CTR /=. 0) &&. Not (Bit BO 5 3) ||. (CTR ==. 0) &&. Bit BO 5 3)
-      V "cond_ok" <== Bit BO 5 0 ||. (Bit CReg 32 BI ==. Bit BO 5 1)
-      if' (V "ctr_ok" &&. V "cond_ok") (if' AA (NIA <== BD) (NIA <== CIA + BD)) (NIA <== CIA + 4)
-      if' LK (LR <== CIA + 4) (return ())
-  , I "bclr"   19  16 $ do
-      -- XXX Assumes 64-bit mode.
-      if' (Not $ Bit BO 5 2) (CTR <== CTR - 1) (return ())
-      V "ctr_ok"  <== Bit BO 5 2 ||. ((CTR /=. 0) &&. Not (Bit BO 5 3) ||. (CTR ==. 0) &&. Bit BO 5 3)
-      V "cond_ok" <== Bit BO 5 0 ||. (Bit CReg 32 BI ==. Bit BO 5 1)
-      if' (V "ctr_ok" &&. V "cond_ok") (NIA <== LR .&. complement 3) (NIA <== CIA + 4)
-      if' LK (LR <== CIA + 4) (return ())
-  , I "cmp"    31   0 $ do
+  , I "mullw"  31 235 $ assign [CR Rc 0, OV OE] RT (EXTS 32 RA * EXTS 32 RB)
+  ]
+
+logical :: [I]
+logical =
+  [ I "and"    31  23 $ assign [CR Rc 0] RA (RS .&. RB)
+  , I "andi"   28   0 $ assign [CR 1  0] RA (RS .&. UI)
+  , I "andis"  29   0 $ assign [CR 1  0] RA (RS .&. shiftL UI 16)
+  , I "or"     31 444 $ assign [CR Rc 0] RA (RS .|. RB)
+  , I "ori"    24   0 $ RA <== RS .|. UI
+  ]
+
+comparison :: [I]
+comparison =
+  [ I "cmp"    31   0 $ do
       if' (L10 ==. 0)
         (do V "a" <== EXTS 32 RA
             V "b" <== EXTS 32 RB)
@@ -75,7 +89,44 @@ instructions = map next
   , I "cmpli"  10   0 $ do
       if' (L10 ==. 0) (V "a" <== 0xFFFFFFFF .|. RA) (V "a" <== RA)
       cmp [CR 1 BF] (V "a") UI
-  , I "lbz"    34   0 $ do
+  ]
+
+branch :: [I]
+branch =
+  [ I "b"      18   0 $ if' AA  (NIA <== LI) (NIA <== CIA + LI) >> if' LK (LR <== CIA + 4) (return ())
+  , I "bc"     16   0 $ do
+      -- XXX Assumes 64-bit mode.
+      if' (Not $ Bit BO 5 2) (CTR <== CTR - 1) (return ())
+      V "ctr_ok"  <== Bit BO 5 2 ||. ((CTR /=. 0) &&. Not (Bit BO 5 3) ||. (CTR ==. 0) &&. Bit BO 5 3)
+      V "cond_ok" <== Bit BO 5 0 ||. (Bit CReg 32 BI ==. Bit BO 5 1)
+      if' (V "ctr_ok" &&. V "cond_ok") (if' AA (NIA <== BD) (NIA <== CIA + BD)) (NIA <== CIA + 4)
+      if' LK (LR <== CIA + 4) (return ())
+  , I "bclr"   19  16 $ do
+      -- XXX Assumes 64-bit mode.
+      if' (Not $ Bit BO 5 2) (CTR <== CTR - 1) (return ())
+      V "ctr_ok"  <== Bit BO 5 2 ||. ((CTR /=. 0) &&. Not (Bit BO 5 3) ||. (CTR ==. 0) &&. Bit BO 5 3)
+      V "cond_ok" <== Bit BO 5 0 ||. (Bit CReg 32 BI ==. Bit BO 5 1)
+      if' (V "ctr_ok" &&. V "cond_ok") (NIA <== LR .&. complement 3) (NIA <== CIA + 4)
+      if' LK (LR <== CIA + 4) (return ())
+  ]
+
+rotating :: [I]
+rotating =
+  [ I "rlwinm" 21 0 $ do
+      V "n" <== SH5
+      V "r" <== ROTL32 RS (V "n")
+      V "m" <== MASK (MB5 + 32) (ME5 + 32)
+      RA    <== V "r" .&. V "m"
+  ]
+
+shifting :: [I]
+shifting =
+  [
+  ]
+
+load :: [I]
+load =
+  [ I "lbz"    34   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
       EA <== V "b" + D
       RT <== MEM EA 1
@@ -95,6 +146,14 @@ instructions = map next
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
       EA <== V "b" + D
       RT <== MEM EA 2
+  , I "lmw"    46   0 $ do
+      if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
+      EA <== V "b" + D
+      V "r" <== RT
+      while (V "r" <=. 31) $ do
+        GPR (V "r") <== MEM EA 4
+        V "r" <== V "r" + 1
+        EA <== EA + 4
   , I "lwz"    32   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
       EA <== V "b" + D
@@ -103,16 +162,11 @@ instructions = map next
       EA <== RA + D
       RT <== MEM EA 4
       RA <== EA
-  , I "mfmsr"  31  83 $ warning "mfmsr instruction ignored"
-  , I "mfspr"  31 339 $ if' (SPR ==. 0x01) (RT <== XER)
-                       (if' (SPR ==. 0x08) (RT <== LR)
-                       (if' (SPR ==. 0x09) (RT <== CTR) (warning "unknown mfspr reg")))
-  , I "mtmsr"  31 146 $ warning "mtmsr instruction ignored"
-  , I "mtspr"  31 467 $ if' (SPR ==. 0x01) (XER <== RS)
-                       (if' (SPR ==. 0x08) (LR  <== RS)
-                       (if' (SPR ==. 0x09) (CTR <== RS) (warning "unknown mfspr reg")))
-  , I "ori"    24   0 $ RA <== RS .|. UI
-  , I "stb"    38   0 $ do
+  ]
+
+store :: [I]
+store =
+  [ I "stb"    38   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
       EA <== V "b" + D
       MEM EA 1 <== RS
@@ -144,6 +198,14 @@ instructions = map next
       EA <== RA + RB
       MEM EA 2 <== RS
       RA <== EA
+  , I "stmw" 47 0 $ do
+      if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
+      EA <== V "b" + D
+      V "r" <== RS
+      while (V "r" <=. 31) $ do
+        MEM EA 4 <== GPR (V "r")
+        V "r" <== V "r" + 1
+        EA <== EA + 4
   , I "stw"    36   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
       EA <== V "b" + D
