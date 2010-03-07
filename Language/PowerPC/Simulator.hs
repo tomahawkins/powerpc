@@ -1,6 +1,7 @@
 -- | PowerPC instruction set simulation.
 module Language.PowerPC.Simulator
-  ( Memory (..)
+  ( Memory  (..)
+  , Machine (..)
   , simulate
   ) where
 
@@ -18,8 +19,10 @@ import Language.PowerPC.RTL
 class Memory a where
   load  :: a -> Word64 -> Int -> IO [Word8]
   store :: a -> Word64 -> [Word8] -> IO ()
-  fetch :: a -> Word64 -> IO Word32
-  fetch mem addr = load mem addr 4 >>= return . fromBytes
+  fetch :: a -> Machine -> Word64 -> IO Word32
+  fetch mem _ addr = load mem addr 4 >>= return . fromBytes
+  readSPR  :: a -> Int -> IO Word64
+  writeSPR :: a -> Int -> Word64 -> IO ()
 
 -- | State of processor.
 data Machine = Machine
@@ -30,21 +33,6 @@ data Machine = Machine
   , xer     :: Word64
   , cr      :: Word32
   }
-
-instance Show Machine where
-  show m = unlines
-    [ printf "pc = %08X  lr = %08X  cr = %08X  xer = %08X" (pc m) (lr m) (cr m) (xer m)
-    , r [0..3]
-    , r [4..7]
-    , r [8..11]
-    , r [12..15]
-    , r [16..19]
-    , r [20..23]
-    , r [24..27]
-    , r [28..31]
-    ]
-    where
-    r ns = intercalate "  " [ printf "r%-2d = %016X" n (gprs m !! n) | n <- ns ]
 
 -- | Run simulation given memory and the starting address of program.
 simulate :: Memory a => a -> Word64 -> IO ()
@@ -60,17 +48,10 @@ simulate memory start = loop Machine
 
   loop :: Machine -> IO ()
   loop m = do
-    --print m >> hFlush stdout
-    next <- fetch memory $ pc m
-    --let (n, s) = rtl (pc m) next
-    --printf "%08X  %-6s  %s\n" (pc m) n (show s) >> hFlush stdout
+    next <- fetch memory m $ pc m
+    hFlush stdout
     n <- step memory next m
-    when (pc m + 4 /= pc n) $ printf "branched from 0x%08X to 0x%08X\n" (pc m) (pc n) >> hFlush stdout
     loop n
-
-  --done :: Machine -> Bool
-  --done m | pc m < base || pc m > base + (fromIntegral (length p) + 4) = error $ printf "program counter out of range: 0x%08X" $ pc m
-         -- | otherwise                                                  = pc m == base + (fromIntegral $ length p)
 
 step :: Memory a => a -> Word32 -> Machine -> IO Machine
 step memory instr m = do
@@ -92,8 +73,8 @@ step memory instr m = do
         else do
           (m, env) <- evalStmt (m, env) stmt
           evalStmt (m, env) $ While cond stmt
-    Warning msg fields -> do
-      putStr ("Warning: " ++ msg)
+    Note msg fields -> do
+      putStr msg
       mapM_ (\ (format, e) -> do
         e <- evalExpr (m, env) e
         putStr "  "
@@ -103,25 +84,34 @@ step memory instr m = do
     Assign cond a b -> do
       b <- evalExpr (m, env) b
       m <- conditions (m, env) b cond
-      let b' = fromIntegral b
+      let b64 = fromIntegral b :: Word64
+          b32 = fromIntegral b :: Word32
       case a of
         V n -> return (m, (n, b) : env)
         --CR
-        CTR -> return (m { ctr = b' }, env)
+        CRField i -> do
+          i <- evalExpr (m, env) i
+          return (m { cr = shiftL (b32 .&. 0xFF) (fromIntegral $ (7 - i) * 4) .|. complement (shiftL 0xFF (fromIntegral $ (7 - i) * 4)) .&. (cr m) }, env)
+        CTR -> return (m { ctr = b64 }, env)
         EA  -> return (m, ("EA", b) : env)
-        LR  -> return (m { lr = b' }, env)
+        LR  -> return (m { lr = b64 }, env)
         GPR n -> do
           n <- evalExpr (m, env) n
-          return (m { gprs = replace (fromIntegral n) b' (gprs m) }, env)
+          return (m { gprs = replace (fromIntegral n) b64 (gprs m) }, env)
         MEM addr bytes -> do
           addr <- evalExpr (m, env) addr
           store memory (fromIntegral addr) $ toBytes bytes b
           return (m, env)
-        NIA -> return (m, ("NIA", b) : env)
-        RA  -> return (m { gprs = replace (ufield 11 15) b' (gprs m) }, env)
-        RT  -> return (m { gprs = replace (ufield  6 10) b' (gprs m) }, env)
-        XER -> return (m { xer = b' }, env)
-        Null -> return (m, env)
+        NIA   -> return (m, ("NIA", b) : env)
+        RA    -> return (m { gprs = replace (ufield 11 15) b64 (gprs m) }, env)
+        RT    -> return (m { gprs = replace (ufield  6 10) b64 (gprs m) }, env)
+        SPR   -> case spr of
+                   1 -> return (m { xer = b64 }, env)
+                   8 -> return (m { lr  = b64 }, env)
+                   9 -> return (m { ctr = b64 }, env)
+                   n -> writeSPR memory n b64 >> return (m, env)
+        XER   -> return (m { xer = b64 }, env)
+        Null  -> return (m, env)
         _ -> error $ "Invalid assignment target: " ++ show a
 
   evalExpr :: (Machine, [(String, Integer)]) -> E -> IO Integer
@@ -131,6 +121,7 @@ step memory instr m = do
     Add a b   -> binop (+) a b
     Sub a b   -> binop (-) a b
     Mul a b   -> binop (*) a b
+    Div a b   -> binop div a b
     Not a     -> uniop (toBool . (== 0)) a
     And a b   -> binop (\ a b -> toBool $ a /= 0 && b /= 0) a b
     Or  a b   -> binop (\ a b -> toBool $ a /= 0 || b /= 0) a b
@@ -143,12 +134,17 @@ step memory instr m = do
     Null      -> error "Invalid expressions: Null"
     Bit a w i -> binop (\ a i -> if i >= fromIntegral w then error "Bit: bit index greater than width" else toBool $ testBit a $ w - 1 - fromIntegral i) a i
     AA        -> return $ bool 30
+    BA        -> return $ ufield 11 15
+    BB        -> return $ ufield 16 20
     BD        -> return $ clearBits (sfield 16 31) [1, 0]
     BF        -> return $ ufield  6  8
     BI        -> return $ ufield 11 15
     BO        -> return $ ufield  6 10
+    BT        -> return $ ufield  6 10
+    CA'       -> return $ toBool $ testBit (xer m) (63 - 34)
     CIA       -> return $ fromIntegral $ pc m
-    CReg      -> return $ fromIntegral $ cr m
+    CR'       -> return $ fromIntegral $ cr m
+    CRField i -> uniop (\ i ->  fromIntegral $ shiftL (cr m) ((7 - fromIntegral i) * 4) .&. 0xFF) i
     CTR       -> return $ fromIntegral $ ctr m
     D         -> return $ sfield 16 31
     EA        -> return $ lookup' "EA" env
@@ -183,7 +179,11 @@ step memory instr m = do
     SH5        -> return $ ufield 16 20
     SH6        -> return $ shiftL (ufield 30 30) 5 .|. ufield 16 20
     SI         -> return $ sfield 16 31
-    SPR        -> return $ shiftL (ufield 16 20) 5 .|. ufield 11 15
+    SPR        -> case spr of
+                    1 -> return $ fromIntegral $ xer m
+                    8 -> return $ fromIntegral $ lr  m
+                    9 -> return $ fromIntegral $ ctr m
+                    n -> readSPR memory n >>= return . fromIntegral
     UI         -> return $ ufield 16 31
     XER        -> return $ fromIntegral $ xer m
     where
@@ -198,6 +198,9 @@ step memory instr m = do
     uniop f a = do
       a <- evalExpr (m, env) a
       return $ f a
+
+  spr :: Int
+  spr = fromIntegral $ shiftL (ufield 16 20) 5 .|. ufield 11 15
 
   toBool :: Bool -> Integer
   toBool True  = 1

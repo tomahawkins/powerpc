@@ -9,6 +9,7 @@ module Language.PowerPC.RTL
   , cmp
   , if'
   , while
+  , note
   , warning
   , (==.)
   , (/=.)
@@ -44,6 +45,7 @@ data E
   | Add E E
   | Sub E E
   | Mul E E
+  | Div E E
   | Not E
   | And E E
   | Or  E E
@@ -56,12 +58,17 @@ data E
   | Null
   | Bit E Int E
   | AA
+  | BA
+  | BB
   | BD
   | BF
   | BI
   | BO
+  | BT
+  | CA'
   | CIA
-  | CReg
+  | CR'
+  | CRField E
   | CTR
   | D
   | EA
@@ -103,7 +110,7 @@ data Stmt
   | Assign  [Cond] E E
   | If E Stmt Stmt
   | While E Stmt
-  | Warning String [(String, E)]
+  | Note String [(String, E)]
   deriving (Show, Eq)
 
 data Cond
@@ -125,7 +132,10 @@ cmp :: [Cond] -> E -> E -> RTL ()
 cmp cond a b = assign cond Null $ a - b
 
 warning :: String -> [(String, E)] -> RTL ()
-warning msg fields = RTL $ \ s -> ((), seqStmts s $ Warning msg fields)
+warning msg fields = note ("WARNING: " ++ msg) fields
+
+note :: String -> [(String, E)] -> RTL ()
+note msg fields = RTL $ \ s -> ((), seqStmts s $ Note msg fields)
 
 if' :: E -> RTL () -> RTL () -> RTL ()
 if' a b c = RTL $ \ s0 -> ((), seqStmts s0 $ If a (stmt b) (stmt c))

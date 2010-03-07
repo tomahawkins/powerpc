@@ -14,7 +14,7 @@ data I = I String Int Int (RTL ())
 -- | Extracts the RTL statements of an instruction.
 rtl :: Word64 -> Word32 -> (String, Stmt)
 rtl addr instr = if null found
-  then error $ printf "unknown instruction:  address: 0x%08X  instruction: 0x%08X  opcd: %d  xo: %d" addr instr opcd xo
+  then error $ printf "unknown instruction:  address: 0x%08x  instruction: 0x%08x  opcd: %d  xo: %d" addr instr opcd xo
   else if length found /= 1
     then error $ printf "overlapping opcode:  opcd: %d  xo: %d" opcd xo
     else head found
@@ -23,29 +23,17 @@ rtl addr instr = if null found
   found = [ (n, stmt f) | I n opcd' xo' f <- instructions, opcd == opcd', xo == xo' ]
 
 next :: I -> I
-next (I name opcd xo rtl) = I name opcd xo $ if branch (stmt rtl) then rtl else rtl >> (NIA <== CIA + 4)
-  where
-  branch :: Stmt -> Bool
-  branch a = case a of
-    Seq a -> or $ map branch a
-    Assign _ NIA _ -> True
-    If _ m n | branch m == branch n -> branch m
-             | otherwise -> error $ "NIA not assigned in all branches: " ++ show a
-    _ -> False
+next (I name opcd xo rtl) = I name opcd xo $ (NIA <== CIA + 4) >> rtl
   
 instructions :: [I]
-instructions = map next $ concat [misc, arithmetic, logical, comparison, branch, rotating, shifting, load, store]
+instructions = map next $ concat [misc, arithmetic, logical, comparison, condition, branch, rotating, shifting, load, store]
 
 misc :: [I]
 misc =
   [ I "mfmsr"  31  83 $ warning "mfmsr instruction ignored" []
-  , I "mfspr"  31 339 $ if' (SPR ==. 0x01) (RT <== XER)
-                       (if' (SPR ==. 0x08) (RT <== LR)
-                       (if' (SPR ==. 0x09) (RT <== CTR) (warning "unknown mfspr register" [("SPR = %d", SPR)])))
+  , I "mfspr"  31 339 $ RT <== SPR
   , I "mtmsr"  31 146 $ warning "mtmsr instruction ignored" []
-  , I "mtspr"  31 467 $ if' (SPR ==. 0x01) (XER <== RS)
-                       (if' (SPR ==. 0x08) (LR  <== RS)
-                       (if' (SPR ==. 0x09) (CTR <== RS) (warning "unknown mtspr register" [("SPR = %d", SPR), ("RS = 0x%016X", RS)])))
+  , I "mtspr"  31 467 $ SPR <== RS
   ]
 
 arithmetic :: [I]
@@ -56,15 +44,21 @@ arithmetic =
   , I "addic"  12   0 $ assign [CA 1] RT (RA + SI)
   , I "addic." 13   0 $ assign [CR 1 0, CA 1] RT (RA + SI)
   , I "addis"  15   0 $ if' (RAI ==. 0) (RT <== shiftL SI 16) (RT <== RA + shiftL SI 16)
-  , I "subf"   31  40 $ assign [CR Rc 0, OV OE] RT (complement RA + RB + 1)
-  , I "subfc"  31   8 $ assign [CA 1, CR Rc 0, OV OE] RT (complement RA + RB + 1)
-  , I "subfic"  8   0 $ assign [CA 1] RT (complement RA + SI + 1)
-  , I "mullw"  31 235 $ assign [CR Rc 0, OV OE] RT (EXTS 32 RA * EXTS 32 RB)
+  , I "divwu"  31 459 $ do
+      V "dividend" <== 0xFFFFFFFF .&. RA
+      V "divisor"  <== 0xFFFFFFFF .&. RA
+      assign [CR Rc 0, OV OE] RT $ Div (V "dividend") (V "divisor")
+  , I "neg"    31 104 $ assign [CR Rc 0, OV OE] RT $ complement RA + 1
+  , I "subf"   31  40 $ assign [CR Rc 0, OV OE] RT $ complement RA + RB + 1
+  , I "subfc"  31   8 $ assign [CA 1, CR Rc 0, OV OE] RT $ complement RA + RB + 1
+  , I "subfic"  8   0 $ assign [CA 1] RT $ complement RA + SI + 1
+  , I "subfe"  31 136 $ assign [CA 1, CR Rc 0, OV OE] RT $ complement RA + RB + CA'
+  , I "mullw"  31 235 $ assign [CR Rc 0, OV OE] RT $ EXTS 32 RA * EXTS 32 RB
   ]
 
 logical :: [I]
 logical =
-  [ I "and"    31  23 $ assign [CR Rc 0] RA (RS .&. RB)
+  [ I "and"    31  28 $ assign [CR Rc 0] RA (RS .&. RB)
   , I "andi"   28   0 $ assign [CR 1  0] RA (RS .&. UI)
   , I "andis"  29   0 $ assign [CR 1  0] RA (RS .&. shiftL UI 16)
   , I "or"     31 444 $ assign [CR Rc 0] RA (RS .|. RB)
@@ -85,14 +79,26 @@ comparison =
       cmp [CR 1 BF] (V "a") SI
   , I "cmpl"   31  32 $ do
       if' (L10 ==. 0)
-        (do V "a" <== 0xFFFFFFFF .|. RA
-            V "b" <== 0xFFFFFFFF .|. RB)
+        (do V "a" <== 0xFFFFFFFF .&. RA
+            V "b" <== 0xFFFFFFFF .&. RB)
         (do V "a" <== RA
             V "b" <== RB)
       cmp [CR 1 BF] (V "a") (V "b")
   , I "cmpli"  10   0 $ do
-      if' (L10 ==. 0) (V "a" <== 0xFFFFFFFF .|. RA) (V "a" <== RA)
+      if' (L10 ==. 0) (V "a" <== 0xFFFFFFFF .&. RA) (V "a" <== RA)
       cmp [CR 1 BF] (V "a") UI
+  ]
+
+condition :: [I]
+condition =
+  [ I "crand"  19 257 $ CRField BT <== CRField BA .&. CRField BB
+  , I "cror"   19 449 $ CRField BT <== CRField BA .|. CRField BB
+  , I "crxor"  19 193 $ CRField BT <== xor (CRField BA) (CRField BB)
+  , I "crnand" 19 225 $ CRField BT <== complement (CRField BA .&. CRField BB)
+  , I "crnor"  19  33 $ CRField BT <== complement (CRField BA .|. CRField BB)
+  , I "creqv"  19 289 $ CRField BT <== complement (xor (CRField BA) (CRField BB))
+  , I "crandc" 19 129 $ CRField BT <== CRField BA .&. complement (CRField BB)
+  , I "crorc"  19 417 $ CRField BT <== CRField BA .|. complement (CRField BB)
   ]
 
 branch :: [I]
@@ -102,16 +108,20 @@ branch =
       -- XXX Assumes 64-bit mode.
       if' (Not $ Bit BO 5 2) (CTR <== CTR - 1) (return ())
       V "ctr_ok"  <== Bit BO 5 2 ||. ((CTR /=. 0) &&. Not (Bit BO 5 3) ||. (CTR ==. 0) &&. Bit BO 5 3)
-      V "cond_ok" <== Bit BO 5 0 ||. (Bit CReg 32 BI ==. Bit BO 5 1)
+      V "cond_ok" <== Bit BO 5 0 ||. (Bit CR' 32 BI ==. Bit BO 5 1)
       if' (V "ctr_ok" &&. V "cond_ok") (if' AA (NIA <== BD) (NIA <== CIA + BD)) (NIA <== CIA + 4)
       if' LK (LR <== CIA + 4) (return ())
   , I "bclr"   19  16 $ do
       -- XXX Assumes 64-bit mode.
       if' (Not $ Bit BO 5 2) (CTR <== CTR - 1) (return ())
       V "ctr_ok"  <== Bit BO 5 2 ||. ((CTR /=. 0) &&. Not (Bit BO 5 3) ||. (CTR ==. 0) &&. Bit BO 5 3)
-      V "cond_ok" <== Bit BO 5 0 ||. (Bit CReg 32 BI ==. Bit BO 5 1)
+      V "cond_ok" <== Bit BO 5 0 ||. (Bit CR' 32 BI ==. Bit BO 5 1)
       if' (V "ctr_ok" &&. V "cond_ok") (NIA <== LR .&. complement 3) (NIA <== CIA + 4)
       if' LK (LR <== CIA + 4) (return ())
+  , I "bcctr"  19 528 $ do
+      V "cond_ok" <== Bit BO 5 0 ||. (Bit CR' 32 BI ==. Bit BO 5 1)
+      if' (V "cond_ok") (NIA <== CTR .&. complement 0x3) (NIA <== CIA + 4)
+      if' (LK) (LR <== CIA + 4) (return ())
   ]
 
 rotating :: [I]
@@ -171,6 +181,10 @@ load =
       EA <== RA + D
       RT <== MEM EA 4
       RA <== EA
+  , I "lwzx"   31 23 $ do
+      if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
+      V "EA" <== V "b" + RB
+      RT <== MEM EA 4
   ]
 
 store :: [I]
