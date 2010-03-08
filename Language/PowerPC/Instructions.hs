@@ -38,30 +38,30 @@ misc =
 
 arithmetic :: [I]
 arithmetic =
-  [ I "add"    31 266 $ assign [CR Rc 0, OV OE] RT (RA + RB)
-  , I "addc"   31  10 $ assign [CA 1, CR Rc 0, OV OE] RT (RA + RB)
+  [ I "add"    31 266 $ assign [CR 0 Rc, OV OE] RT (RA + RB)
+  , I "addc"   31  10 $ assign [CA 1, CR 0 Rc, OV OE] RT (RA + RB)
   , I "addi"   14   0 $ if' (RAI ==. 0) (RT <== SI) (RT <== RA + SI)
   , I "addic"  12   0 $ assign [CA 1] RT (RA + SI)
-  , I "addic." 13   0 $ assign [CR 1 0, CA 1] RT (RA + SI)
+  , I "addic." 13   0 $ assign [CR 0 1, CA 1] RT (RA + SI)
   , I "addis"  15   0 $ if' (RAI ==. 0) (RT <== shiftL SI 16) (RT <== RA + shiftL SI 16)
   , I "divwu"  31 459 $ do
       V "dividend" <== 0xFFFFFFFF .&. RA
-      V "divisor"  <== 0xFFFFFFFF .&. RA
-      assign [CR Rc 0, OV OE] RT $ Div (V "dividend") (V "divisor")
-  , I "neg"    31 104 $ assign [CR Rc 0, OV OE] RT $ complement RA + 1
-  , I "subf"   31  40 $ assign [CR Rc 0, OV OE] RT $ complement RA + RB + 1
-  , I "subfc"  31   8 $ assign [CA 1, CR Rc 0, OV OE] RT $ complement RA + RB + 1
+      V "divisor"  <== 0xFFFFFFFF .&. RB
+      assign [CR 0 Rc, OV OE] RT $ Div (V "dividend") (V "divisor")
+  , I "neg"    31 104 $ assign [CR 0 Rc, OV OE] RT $ complement RA + 1
+  , I "subf"   31  40 $ assign [CR 0 Rc, OV OE] RT $ complement RA + RB + 1
+  , I "subfc"  31   8 $ assign [CA 1, CR 0 Rc, OV OE] RT $ complement RA + RB + 1
   , I "subfic"  8   0 $ assign [CA 1] RT $ complement RA + SI + 1
-  , I "subfe"  31 136 $ assign [CA 1, CR Rc 0, OV OE] RT $ complement RA + RB + CA'
-  , I "mullw"  31 235 $ assign [CR Rc 0, OV OE] RT $ EXTS 32 RA * EXTS 32 RB
+  , I "subfe"  31 136 $ assign [CA 1, CR 0 Rc, OV OE] RT $ complement RA + RB + CA'
+  , I "mullw"  31 235 $ assign [CR 0 Rc, OV OE] RT $ EXTS 32 RA * EXTS 32 RB
   ]
 
 logical :: [I]
 logical =
-  [ I "and"    31  28 $ assign [CR Rc 0] RA (RS .&. RB)
-  , I "andi"   28   0 $ assign [CR 1  0] RA (RS .&. UI)
-  , I "andis"  29   0 $ assign [CR 1  0] RA (RS .&. shiftL UI 16)
-  , I "or"     31 444 $ assign [CR Rc 0] RA (RS .|. RB)
+  [ I "and"    31  28 $ assign [CR 0 Rc] RA $ RS .&. RB
+  , I "andi"   28   0 $ assign [CR 0 1 ] RA $ RS .&. UI
+  , I "andis"  29   0 $ assign [CR 0 1 ] RA $ RS .&. shiftL UI 16
+  , I "or"     31 444 $ assign [CR 0 Rc] RA $ RS .|. RB
   , I "ori"    24   0 $ RA <== RS .|. UI
   ]
 
@@ -73,20 +73,20 @@ comparison =
             V "b" <== EXTS 32 RB)
         (do V "a" <== RA
             V "b" <== RB)
-      cmp [CR 1 BF] (V "a") (V "b")
+      cmp [CR BF 1] (V "a") (V "b")
   , I "cmpi"   11   0 $ do
       if' (L10 ==. 0) (V "a" <== EXTS 32 RA) (V "a" <== RA)
-      cmp [CR 1 BF] (V "a") SI
+      cmp [CR BF 1] (V "a") SI
   , I "cmpl"   31  32 $ do
       if' (L10 ==. 0)
         (do V "a" <== 0xFFFFFFFF .&. RA
             V "b" <== 0xFFFFFFFF .&. RB)
         (do V "a" <== RA
             V "b" <== RB)
-      cmp [CR 1 BF] (V "a") (V "b")
+      cmp [CR BF 1] (V "a") (V "b")
   , I "cmpli"  10   0 $ do
       if' (L10 ==. 0) (V "a" <== 0xFFFFFFFF .&. RA) (V "a" <== RA)
-      cmp [CR 1 BF] (V "a") UI
+      cmp [CR BF 1] (V "a") UI
   ]
 
 condition :: [I]
@@ -109,18 +109,18 @@ branch =
       if' (Not $ Bit BO 5 2) (CTR <== CTR - 1) (return ())
       V "ctr_ok"  <== Bit BO 5 2 ||. ((CTR /=. 0) &&. Not (Bit BO 5 3) ||. (CTR ==. 0) &&. Bit BO 5 3)
       V "cond_ok" <== Bit BO 5 0 ||. (Bit CR' 32 BI ==. Bit BO 5 1)
-      if' (V "ctr_ok" &&. V "cond_ok") (if' AA (NIA <== BD) (NIA <== CIA + BD)) (NIA <== CIA + 4)
+      if' (V "ctr_ok" &&. V "cond_ok") (if' AA (NIA <== BD) (NIA <== CIA + BD)) (return ())
       if' LK (LR <== CIA + 4) (return ())
   , I "bclr"   19  16 $ do
       -- XXX Assumes 64-bit mode.
       if' (Not $ Bit BO 5 2) (CTR <== CTR - 1) (return ())
       V "ctr_ok"  <== Bit BO 5 2 ||. ((CTR /=. 0) &&. Not (Bit BO 5 3) ||. (CTR ==. 0) &&. Bit BO 5 3)
       V "cond_ok" <== Bit BO 5 0 ||. (Bit CR' 32 BI ==. Bit BO 5 1)
-      if' (V "ctr_ok" &&. V "cond_ok") (NIA <== LR .&. complement 3) (NIA <== CIA + 4)
+      if' (V "ctr_ok" &&. V "cond_ok") (NIA <== LR .&. complement 3) (return ())
       if' LK (LR <== CIA + 4) (return ())
   , I "bcctr"  19 528 $ do
       V "cond_ok" <== Bit BO 5 0 ||. (Bit CR' 32 BI ==. Bit BO 5 1)
-      if' (V "cond_ok") (NIA <== CTR .&. complement 0x3) (NIA <== CIA + 4)
+      if' (V "cond_ok") (NIA <== CTR .&. complement 0x3) (return ())
       if' (LK) (LR <== CIA + 4) (return ())
   ]
 
@@ -130,12 +130,12 @@ rotating =
       V "n" <== SH5
       V "r" <== ROTL32 RS (V "n")
       V "m" <== MASK (MB5 + 32) (ME5 + 32)
-      RA    <== V "r" .&. V "m" .|. RA .&. complement (V "m")
+      assign [CR 0 Rc] RA $ V "r" .&. V "m" .|. RA .&. complement (V "m")
   , I "rlwinm" 21 0 $ do
       V "n" <== SH5
       V "r" <== ROTL32 RS (V "n")
       V "m" <== MASK (MB5 + 32) (ME5 + 32)
-      RA    <== V "r" .&. V "m"
+      assign [CR 0 Rc] RA $ V "r" .&. V "m"
   ]
 
 shifting :: [I]

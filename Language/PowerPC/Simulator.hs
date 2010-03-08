@@ -144,7 +144,7 @@ step memory instr m = do
     CA'       -> return $ toBool $ testBit (xer m) (63 - 34)
     CIA       -> return $ fromIntegral $ pc m
     CR'       -> return $ fromIntegral $ cr m
-    CRField i -> uniop (\ i ->  fromIntegral $ shiftL (cr m) ((7 - fromIntegral i) * 4) .&. 0xFF) i
+    CRField i -> uniop (\ i ->  fromIntegral $ shiftR (cr m) ((7 - fromIntegral i) * 4) .&. 0xFF) i
     CTR       -> return $ fromIntegral $ ctr m
     D         -> return $ sfield 16 31
     EA        -> return $ lookup' "EA" env
@@ -225,7 +225,7 @@ step memory instr m = do
     condition n cond = case cond of
       CA c -> on c $ return n { xer = if isCA value then setBit (xer n) 29 else clearBit (xer n) 29 }
       OV c -> on c $ return n { xer = if isOV value then setBits (xer n) [31, 30] else clearBit (xer n) 30 }
-      CR c field -> on c $ do
+      CR field c -> on c $ do
         field <- evalExpr (m, env) field
         let bits = [(0, isLT value), (1, isGT value), (2, isEQ value), (3, testBit (xer n) 31)]
             bitsToSet   = map f [ n | (n, a) <- bits, a ]
