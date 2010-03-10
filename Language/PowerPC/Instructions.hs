@@ -8,7 +8,6 @@ import Text.Printf
 
 import Language.PowerPC.Opcode
 import Language.PowerPC.RTL
-import Language.PowerPC.Utils
 
 data I = I String Int Int (RTL ())
 
@@ -168,11 +167,11 @@ load =
       RA <== EA
   , I "lhz"    40   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== clearBit (V "b" + D) 0
+      EA <== V "b" + D
       RT <== MEM EA 2
   , I "lmw"    46   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== clearBits (V "b" + D) [1, 0]
+      EA <== V "b" + D
       V "r" <== RTI
       while (V "r" <=. 31) $ do
         GPR (V "r") <== MEM EA 4
@@ -180,15 +179,15 @@ load =
         EA <== EA + 4
   , I "lwz"    32   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== clearBits (V "b" + D) [1, 0]
+      EA <== V "b" + D
       RT <== MEM EA 4
   , I "lwzu"   33   0 $ do
-      EA <== clearBits (RA + D) [1, 0]
+      EA <== RA + D
       RT <== MEM EA 4
       RA <== EA
   , I "lwzx"   31 23 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== clearBits (V "b" + RB) [1, 0]
+      EA <== V "b" + RB
       RT <== MEM EA 4
   ]
 
@@ -212,23 +211,23 @@ store =
       RA <== EA
   , I "sth"    44   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== clearBit (V "b" + D) 0
+      EA <== V "b" + D
       MEM EA 2 <== RS
   , I "sthx"   31 407 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== clearBit (V "b" + RB) 0
+      EA <== V "b" + RB
       MEM EA 2 <== RS
   , I "sthu"   45   0 $ do
-      EA <== clearBit (RA + D) 0
+      EA <== RA + D
       MEM EA 2 <== RS
       RA <== EA
   , I "sthux"  31 439 $ do
-      EA <== clearBit (RA + RB) 0
+      EA <== RA + RB
       MEM EA 2 <== RS
       RA <== EA
   , I "stmw" 47 0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== clearBits (V "b" + D) [1, 0]
+      EA <== V "b" + D
       V "r" <== RSI
       while (V "r" <=. 31) $ do
         MEM EA 4 <== GPR (V "r")
@@ -236,18 +235,18 @@ store =
         EA <== EA + 4
   , I "stw"    36   0 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== clearBits (V "b" + D) [1, 0]
+      EA <== V "b" + D
       MEM EA 4 <== RS
   , I "stwx"   31 151 $ do
       if' (RAI ==. 0) (V "b" <== 0) (V "b" <== RA)
-      EA <== clearBits (V "b" + RB) [1, 0]
+      EA <== V "b" + RB
       MEM EA 4 <== RS
   , I "stwu"   37   0 $ do
-      EA <== clearBits (RA + D) [1, 0]
+      EA <== RA + D
       MEM EA 4 <== RS
       RA <== EA
   , I "stwux"  31 183 $ do
-      EA <== clearBits (RA + RB) [1, 0]
+      EA <== RA + RB
       MEM EA 4 <== RS
       RA <== EA
   ] 
