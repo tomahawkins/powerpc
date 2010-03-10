@@ -10,10 +10,10 @@ import Data.Bits
 import Data.List
 import Data.Word
 import System.IO
-import Text.Printf
 
 import Language.PowerPC.Instructions
 import Language.PowerPC.RTL
+import Language.PowerPC.Utils
 
 -- | Memory interface.
 class Memory a where
@@ -23,6 +23,8 @@ class Memory a where
   fetch mem _ addr = load mem addr 4 >>= return . fromBytes
   readSPR  :: a -> Int -> IO Word64
   writeSPR :: a -> Int -> Word64 -> IO ()
+  readMSR  :: a -> IO Word64
+  writeMSR :: a -> Word64 -> IO ()
 
 -- | State of processor.
 data Machine = Machine
@@ -73,14 +75,6 @@ step memory instr m = do
         else do
           (m, env) <- evalStmt (m, env) stmt
           evalStmt (m, env) $ While cond stmt
-    Note msg fields -> do
-      putStr msg
-      mapM_ (\ (format, e) -> do
-        e <- evalExpr (m, env) e
-        putStr "  "
-        printf format (fromIntegral e :: Word64)) fields
-      putStrLn ""
-      return (m, env)
     Assign cond a b -> do
       b <- evalExpr (m, env) b
       m <- conditions (m, env) b cond
@@ -102,6 +96,7 @@ step memory instr m = do
           addr <- evalExpr (m, env) addr
           store memory (fromIntegral addr) $ toBytes bytes b
           return (m, env)
+        MSR   -> writeMSR memory b64 >> return (m, env)
         NIA   -> return (m, ("NIA", b) : env)
         RA    -> return (m { gprs = replace (ufield 11 15) b64 (gprs m) }, env)
         RT    -> return (m { gprs = replace (ufield  6 10) b64 (gprs m) }, env)
@@ -164,6 +159,7 @@ step memory instr m = do
       addr <- evalExpr (m, env) addr
       value <- load memory (fromIntegral addr) bytes
       return $ fromBytes value
+    MSR        -> readMSR memory >>= return . fromIntegral
     NIA        -> return $ lookup' "NIA" env
     OE         -> return $ bool 21
     RAI        -> return $ ufield 11 15
@@ -275,12 +271,6 @@ lookup' :: String -> [(String, b)] -> b
 lookup' a table = case lookup a table of
   Just b -> b
   Nothing -> error $ "Variable name not found: " ++ a
-
-clearBits :: Bits a => a -> [Int] -> a
-clearBits = foldl clearBit
-
-setBits :: Bits a => a -> [Int] -> a
-setBits = foldl setBit
 
 rotateLN :: Int -> Integer -> Integer -> Integer
 rotateLN carryBit a n | n <= 0 = a
