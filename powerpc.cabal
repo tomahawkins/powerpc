@@ -1,12 +1,12 @@
 name:    powerpc
-version: 0.0.1
+version: 0.0.2
 
-category: Language
+category: Language, Embedded
 
 synopsis: Tools for PowerPC programs.
 
 description:
-    TODO
+    Analysis tools for PowerPC programs.
 
 author:     Tom Hawkins <tomahawkins@gmail.com>
 maintainer: Tom Hawkins <tomahawkins@gmail.com>
@@ -19,12 +19,9 @@ homepage: http://tomahawkins.org
 build-type:    Simple
 cabal-version: >= 1.6
 
-extra-source-files:
-  RELEASE-NOTES
-
 library
     build-depends:
-        base       >= 4.2     && < 5
+        base       >= 4.0     && < 5
 
     exposed-modules:
         Language.PowerPC
@@ -33,8 +30,6 @@ library
         Language.PowerPC.RTL
         Language.PowerPC.Simulator
 
-    if impl(ghc > 6.8)
-          ghc-options: -fwarn-tabs
     ghc-options:       -W
 
 source-repository head
