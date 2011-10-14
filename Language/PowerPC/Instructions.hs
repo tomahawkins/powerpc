@@ -13,11 +13,10 @@ data I = I String Int Int (RTL ())
 
 -- | Extracts the RTL statements of an instruction.
 rtl :: Word64 -> Word32 -> (String, Stmt)
-rtl addr instr = if null found
-  then error $ printf "unknown instruction:  address: 0x%08x  instruction: 0x%08x  opcd: %d  xo: %d" addr instr opcd xo
-  else if length found /= 1
-    then error $ printf "overlapping opcode:  opcd: %d  xo: %d" opcd xo
-    else head found
+rtl addr instr = case found of
+  []  -> error $ printf "unknown instruction:  address: 0x%08x  instruction: 0x%08x  opcd: %d  xo: %d" addr instr opcd xo
+  [a] -> a
+  _   -> error $ printf "overlapping opcode:  opcd: %d  xo: %d" opcd xo
   where
   (opcd, xo) = opcode instr
   found = [ (n, stmt f) | I n opcd' xo' f <- instructions, opcd == opcd', xo == xo' ]

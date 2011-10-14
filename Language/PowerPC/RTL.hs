@@ -24,7 +24,7 @@ import Data.Bits
 infix  4 ==., /=., <., <=., >., >=.
 infixl 3 &&.
 infixl 2 ||.
-infixr 1 <==
+infixr 0 <==
 
 data RTL a = RTL (Stmt -> (a, Stmt))
 
